@@ -15,12 +15,11 @@
 package fbcindex
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"path"
-	"text/template"
+	"strings"
 	"time"
 
 	"github.com/operator-framework/api/pkg/operators/v1alpha1"
@@ -31,7 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/retry"
-	pointer "k8s.io/utils/pointer"
+	"k8s.io/utils/pointer"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	"github.com/operator-framework/operator-sdk/internal/olm/operator"
@@ -44,10 +43,12 @@ const (
 	defaultGRPCPort = 50051
 
 	defaultContainerName     = "registry-grpc"
+	defaultInitContainerName = "registry-grpc-init"
 	defaultContainerPortName = "grpc"
 
-	defaultConfigMapName = "operator-sdk-run-bundle-config"
-	defaultConfigMapKey  = "extraFBC"
+	defaultConfigMapKey = "extraFBC"
+
+	maxConfigMapSize = 1 * 1024 * 1024
 )
 
 // FBCRegistryPod holds resources necessary for creation of a registry pod in FBC scenarios.
@@ -76,6 +77,10 @@ type FBCRegistryPod struct { //nolint:maligned
 	// SecurityContext on the Pod
 	SecurityContext string
 
+	configMapName string
+
+	cmWriter configMapWriter
+
 	cfg *operator.Configuration
 }
 
@@ -89,7 +94,13 @@ func (f *FBCRegistryPod) init(cfg *operator.Configuration, cs *v1alpha1.CatalogS
 		f.FBCIndexRootDir = fmt.Sprintf("/%s-configs", cs.Name)
 	}
 
+	if f.configMapName == "" {
+		f.configMapName = fmt.Sprintf("%s-configmap", cs.Name)
+	}
+
 	f.cfg = cfg
+
+	f.cmWriter = newGZIPWriter(f.configMapName, cfg.Namespace)
 
 	// validate the FBCRegistryPod struct and ensure required fields are set
 	if err := f.validate(); err != nil {
@@ -124,6 +135,16 @@ func (f *FBCRegistryPod) Create(ctx context.Context, cfg *operator.Configuration
 		f.pod.Spec.SecurityContext = &corev1.PodSecurityContext{
 			SeccompProfile: &corev1.SeccompProfile{
 				Type: corev1.SeccompProfileTypeRuntimeDefault,
+			},
+		}
+
+		// Update the Registry Pod container security context to be restrictive
+		f.pod.Spec.Containers[0].SecurityContext = &corev1.SecurityContext{
+			Privileged:               pointer.Bool(false),
+			ReadOnlyRootFilesystem:   pointer.Bool(false),
+			AllowPrivilegeEscalation: pointer.Bool(false),
+			Capabilities: &corev1.Capabilities{
+				Drop: []corev1.Capability{"ALL"},
 			},
 		}
 	}
@@ -203,16 +224,59 @@ func (f *FBCRegistryPod) podForBundleRegistry(cs *v1alpha1.CatalogSource) (*core
 	bundleImage := f.BundleItems[len(f.BundleItems)-1].ImageTag
 
 	// construct the container command for pod spec
-	containerCmd, err := f.getContainerCmd()
-	if err != nil {
-		return nil, err
-	}
+	containerCmd := fmt.Sprintf(`opm serve %s -p %d`, f.FBCIndexRootDir, f.GRPCPort) //f.getContainerCmd()
 
 	// create ConfigMap if it does not exist,
 	// if it exists, then update it with new content.
-	cm, err := f.createConfigMap(cs)
+	cms, err := f.createConfigMaps(cs)
 	if err != nil {
 		return nil, fmt.Errorf("configMap error: %w", err)
+	}
+
+	var (
+		volumes            []corev1.Volume
+		sharedVolumeMounts []corev1.VolumeMount
+		gzipVolumeMount    []corev1.VolumeMount
+	)
+
+	for _, cm := range cms {
+		volumes = append(volumes, corev1.Volume{
+			Name: k8sutil.TrimDNS1123Label(cm.Name + "-volume"),
+			VolumeSource: corev1.VolumeSource{
+				ConfigMap: &corev1.ConfigMapVolumeSource{
+					Items: []corev1.KeyToPath{
+						{
+							Key:  defaultConfigMapKey,
+							Path: path.Join(cm.Name, f.cmWriter.getFilePath()),
+						},
+					},
+					LocalObjectReference: corev1.LocalObjectReference{
+						Name: cm.Name,
+					},
+				},
+			},
+		})
+
+		volumes = append(volumes, corev1.Volume{
+			Name: k8sutil.TrimDNS1123Label(cm.Name + "-unzip"),
+			VolumeSource: corev1.VolumeSource{
+				EmptyDir: &corev1.EmptyDirVolumeSource{},
+			},
+		})
+
+		vm := corev1.VolumeMount{
+			Name:      k8sutil.TrimDNS1123Label(cm.Name + "-unzip"),
+			MountPath: path.Join(f.FBCIndexRootDir, cm.Name),
+			SubPath:   cm.Name,
+		}
+
+		sharedVolumeMounts = append(sharedVolumeMounts, vm)
+
+		gzipVolumeMount = append(gzipVolumeMount, corev1.VolumeMount{
+			Name:      k8sutil.TrimDNS1123Label(cm.Name + "-volume"),
+			MountPath: path.Join("/compressed", f.FBCIndexRootDir, cm.Name),
+			SubPath:   cm.Name,
+		})
 	}
 
 	// make the pod definition
@@ -256,24 +320,7 @@ func (f *FBCRegistryPod) podForBundleRegistry(cs *v1alpha1.CatalogSource) (*core
 			//         Type: corev1.SeccompProfileTypeRuntimeDefault,
 			//     },
 			// },
-			Volumes: []corev1.Volume{
-				{
-					Name: k8sutil.TrimDNS1123Label(cm.Name + "-volume"),
-					VolumeSource: corev1.VolumeSource{
-						ConfigMap: &corev1.ConfigMapVolumeSource{
-							Items: []corev1.KeyToPath{
-								{
-									Key:  defaultConfigMapKey,
-									Path: path.Join(defaultConfigMapName, fmt.Sprintf("%s.yaml", defaultConfigMapKey)),
-								},
-							},
-							LocalObjectReference: corev1.LocalObjectReference{
-								Name: cm.Name,
-							},
-						},
-					},
-				},
-			},
+			Volumes: volumes,
 			Containers: []corev1.Container{
 				{
 					Name:  defaultContainerName,
@@ -286,94 +333,168 @@ func (f *FBCRegistryPod) podForBundleRegistry(cs *v1alpha1.CatalogSource) (*core
 					Ports: []corev1.ContainerPort{
 						{Name: defaultContainerPortName, ContainerPort: f.GRPCPort},
 					},
-					VolumeMounts: []corev1.VolumeMount{
-						{
-							Name:      k8sutil.TrimDNS1123Label(cm.Name + "-volume"),
-							MountPath: path.Join(f.FBCIndexRootDir, cm.Name),
-							SubPath:   cm.Name,
-						},
-					},
-					SecurityContext: &corev1.SecurityContext{
-						Privileged:               pointer.Bool(false),
-						ReadOnlyRootFilesystem:   pointer.Bool(false),
-						AllowPrivilegeEscalation: pointer.Bool(false),
-						Capabilities: &corev1.Capabilities{
-							Drop: []corev1.Capability{"ALL"},
-						},
-					},
+					VolumeMounts: sharedVolumeMounts,
 				},
 			},
 			ServiceAccountName: f.cfg.ServiceAccount,
 		},
 	}
 
+	f.addGZIPInitContainer(sharedVolumeMounts, gzipVolumeMount)
+
 	return f.pod, nil
 }
 
-// container creation command for FBC type images.
-const fbcCmdTemplate = `opm serve {{ .FBCIndexRootDir}} -p {{ .GRPCPort }}`
+func (f *FBCRegistryPod) addGZIPInitContainer(containerVolumeMount []corev1.VolumeMount, gzipVolumeMount []corev1.VolumeMount) {
+	initContainerVolumeMount := append(containerVolumeMount, gzipVolumeMount...)
+	f.pod.Spec.InitContainers = append(f.pod.Spec.InitContainers, corev1.Container{
+		Name:  defaultInitContainerName,
+		Image: "docker.io/library/busybox:1.36.0",
+		Command: []string{
+			"sh",
+			"-c",
+			fmt.Sprintf(`for dir in /compressed%s/*configmap-partition*; do `, f.FBCIndexRootDir) +
+				`for f in ${dir}/*; do ` +
+				`file="${f%.*}";` +
+				`file="${file#/compressed}";` +
+				`cat ${f} | gzip -d -c > "${file}";` +
+				"done;" +
+				"done;",
+		},
+		VolumeMounts: initContainerVolumeMount,
+	})
+}
 
 // createConfigMap creates a ConfigMap if it does not exist and if it does, then update it with new content.
 // Also, sets the owner reference by making CatalogSource the owner of ConfigMap object for cleanup purposes.
-func (f *FBCRegistryPod) createConfigMap(cs *v1alpha1.CatalogSource) (*corev1.ConfigMap, error) {
-	// new ConfigMap
-	cm := &corev1.ConfigMap{
-		TypeMeta: metav1.TypeMeta{
-			APIVersion: corev1.SchemeGroupVersion.String(),
-			Kind:       "ConfigMap",
-		},
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      defaultConfigMapName,
-			Namespace: f.cfg.Namespace,
-		},
-		Data: map[string]string{
-			defaultConfigMapKey: f.FBCContent,
-		},
+func (f *FBCRegistryPod) createConfigMaps(cs *v1alpha1.CatalogSource) ([]*corev1.ConfigMap, error) {
+	// By default just use the partitioning logic.
+	// If the entire FBC contents can fit in one ConfigMap it will.
+	cms, err := f.partitionedConfigMaps()
+	if err != nil {
+		return nil, err
 	}
 
-	// set owner reference by making catalog source the owner of ConfigMap object
-	if err := controllerutil.SetOwnerReference(cs, cm, f.cfg.Scheme); err != nil {
-		return nil, fmt.Errorf("set configmap %q owner reference: %v", cm.GetName(), err)
+	// Loop through all the ConfigMaps and set the OwnerReference and try to create them
+	for _, cm := range cms {
+		// set owner reference by making catalog source the owner of ConfigMap object
+		if err := controllerutil.SetOwnerReference(cs, cm, f.cfg.Scheme); err != nil {
+			return nil, fmt.Errorf("set configmap %q owner reference: %v", cm.GetName(), err)
+		}
+
+		err := f.createOrUpdateConfigMap(cm)
+		if err != nil {
+			return nil, err
+		}
 	}
 
+	return cms, nil
+}
+
+// partitionedConfigMaps will create and return a list of *corev1.ConfigMap
+// that represents all the ConfigMaps that will need to be created to
+// properly have all the FBC contents rendered in the registry pod.
+func (f *FBCRegistryPod) partitionedConfigMaps() ([]*corev1.ConfigMap, error) {
+	var err error
+	// Split on the YAML separator `---`
+	yamlDefs := strings.Split(f.FBCContent, "---")
+
+	configMaps, err := f.getConfigMaps(yamlDefs)
+	if err != nil {
+		return nil, err
+	}
+
+	return configMaps, nil
+}
+
+// getConfigMaps builds a list of configMaps, to contain the bundle.
+func (f *FBCRegistryPod) getConfigMaps(yamlDefs []string) ([]*corev1.ConfigMap, error) {
+	defer f.cmWriter.reset()
+
+	cm := f.cmWriter.newConfigMap(fmt.Sprintf("%s-partition-1", f.configMapName))
+	configMaps := []*corev1.ConfigMap{cm}
+	cmSize := cm.Size()
+
+	partitionCount := 1
+
+	// for each chunk of yaml see if it can be added to the ConfigMap partition
+	for _, yamlDef := range yamlDefs {
+		yamlDef = strings.TrimSpace(yamlDef)
+		if len(yamlDef) == 0 {
+			continue
+		}
+
+		if f.cmWriter.isEmpty() {
+			data := yamlSeparator + yamlDef
+			exceeded, err := f.cmWriter.exceedMaxLength(cmSize, data)
+			if err != nil {
+				return nil, err
+			}
+			if exceeded {
+				err = f.cmWriter.closeCM(cm)
+				if err != nil {
+					return nil, err
+				}
+
+				partitionCount++
+
+				cm = f.cmWriter.newConfigMap(fmt.Sprintf("%s-partition-%d", f.configMapName, partitionCount))
+				configMaps = append(configMaps, cm)
+				cmSize = cm.Size()
+
+				err = f.cmWriter.addData(yamlDef)
+				if err != nil {
+					return nil, err
+				}
+			} else {
+				err = f.cmWriter.continueAddData(data)
+				if err != nil {
+					return nil, err
+				}
+			}
+		} else {
+			err := f.cmWriter.addData(yamlDef)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	// write the data of the last cm
+	err := f.cmWriter.writeLastFragment(cm)
+	if err != nil {
+		return nil, err
+	}
+
+	return configMaps, nil
+}
+
+// createOrUpdateConfigMap will create a ConfigMap if it doesn't exist or
+// update it if it already exists.
+func (f *FBCRegistryPod) createOrUpdateConfigMap(cm *corev1.ConfigMap) error {
 	cmKey := types.NamespacedName{
-		Namespace: f.cfg.Namespace,
-		Name:      defaultConfigMapName,
+		Namespace: cm.GetNamespace(),
+		Name:      cm.GetName(),
 	}
 
 	// create a ConfigMap if it does not exist;
 	// update it with new data if it already exists.
 	if err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
-		err := f.cfg.Client.Get(context.TODO(), cmKey, cm)
+		tempCm := &corev1.ConfigMap{}
+		err := f.cfg.Client.Get(context.TODO(), cmKey, tempCm)
 		if apierrors.IsNotFound(err) {
 			if err := f.cfg.Client.Create(context.TODO(), cm); err != nil {
 				return fmt.Errorf("error creating ConfigMap: %w", err)
 			}
+			return nil
 		}
 		// update ConfigMap with new FBCContent
-		cm.Data = map[string]string{defaultConfigMapKey: f.FBCContent}
-		return f.cfg.Client.Update(context.TODO(), cm)
+		tempCm.Data = cm.Data
+		tempCm.BinaryData = cm.BinaryData
+		return f.cfg.Client.Update(context.TODO(), tempCm)
 	}); err != nil {
-		return nil, fmt.Errorf("error updating ConfigMap: %w", err)
+		return fmt.Errorf("error updating ConfigMap: %w", err)
 	}
 
-	return cm, nil
-
-}
-
-// getContainerCmd uses templating to construct the container command
-// and throws error if unable to parse and execute the container command
-func (f *FBCRegistryPod) getContainerCmd() (string, error) {
-	// add the custom dirname template function to the
-	// template's FuncMap and parse the cmdTemplate
-	t := template.Must(template.New("cmd").Parse(fbcCmdTemplate))
-
-	// execute the command by applying the parsed template to command
-	// and write command output to out
-	out := &bytes.Buffer{}
-	if err := t.Execute(out, f); err != nil {
-		return "", fmt.Errorf("parse container command: %w", err)
-	}
-
-	return out.String(), nil
+	return nil
 }

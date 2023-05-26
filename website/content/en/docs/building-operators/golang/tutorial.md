@@ -66,7 +66,7 @@ The Manager can restrict the namespace that all controllers will watch for resou
 mgr, err := ctrl.NewManager(cfg, manager.Options{Namespace: namespace})
 ```
 
-By default this will be the namespace that the operator is running in. To watch all namespaces leave the namespace option empty:
+By default this will be empty string which means watch all namespaces:
 
 ```Go
 mgr, err := ctrl.NewManager(cfg, manager.Options{Namespace: ""})
@@ -97,14 +97,12 @@ This will scaffold the Memcached resource API at `api/v1alpha1/memcached_types.g
 
 For an in-depth explanation of Kubernetes APIs and the group-version-kind model, check out these [kubebuilder docs][kb-doc-gkvs].
 
-In general, it's recommended to have one controller responsible for manage each API created for the project to
+In general, it's recommended to have one controller responsible for managing each API created for the project to
 properly follow the design goals set by [controller-runtime][controller-runtime].
 
 ### Define the API
 
-To begin, we will represent our API by defining the `Memcached` type, which will have a `MemcachedSpec.Size` field to set the quantity of memcached instances (CRs) to be deployed, and a `MemcachedStatus.Nodes` field to store a CR's Pod names.
-
-**Note** The Node field is just to illustrate an example of a Status field. In real cases, it would be recommended to use [Conditions][conditionals].
+To begin, we will represent our API by defining the `Memcached` type, which will have a `MemcachedSpec.Size` field to set the quantity of memcached instances (CRs) to be deployed, and a `MemcachedStatus.Conditions` field to store a CR's [Conditions][conditionals].
 
 Define the API for the Memcached Custom Resource(CR) by modifying the Go type definitions at `api/v1alpha1/memcached_types.go` to have the following spec and status:
 
@@ -113,12 +111,20 @@ Define the API for the Memcached Custom Resource(CR) by modifying the Go type de
 type MemcachedSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
-	// Size defines the number of Memcached instances
+
 	// The following markers will use OpenAPI v3 schema to validate the value
+	// More info: https://book.kubebuilder.io/reference/markers/crd-validation.html
 	// +kubebuilder:validation:Minimum=1
-	// +kubebuilder:validation:Maximum=3
+	// +kubebuilder:validation:Maximum=5
 	// +kubebuilder:validation:ExclusiveMaximum=false
+
+	// Size defines the number of Memcached instances
+	// +operator-sdk:csv:customresourcedefinitions:type=spec
 	Size int32 `json:"size,omitempty"`
+
+	// Port defines the port that will be used to init the container with the image
+	// +operator-sdk:csv:customresourcedefinitions:type=spec
+	ContainerPort int32 `json:"containerPort,omitempty"`
 }
 
 // MemcachedStatus defines the observed state of Memcached
@@ -130,6 +136,10 @@ type MemcachedStatus struct {
 	// condition types may define expected values and meanings for this field, and whether the values
 	// are considered a guaranteed API.
 	// Memcached.status.conditions.Message is a human readable message indicating details about the transition.
+	// For further information see: https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#typical-status-properties
+
+	// Conditions store the status conditions of the Memcached instances
+	// +operator-sdk:csv:customresourcedefinitions:type=status
 	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,1,rep,name=conditions"`
 }
 ```
@@ -173,7 +183,9 @@ See the [OpenAPI validation][openapi-validation] doc for details.
 
 ## Implement the Controller
 
-For this example replace the generated controller file `controllers/memcached_controller.go` with the example [`memcached_controller.go`][memcached_controller] implementation.
+For this example replace the generated controller file `controllers/memcached_controller.go` with the example [`memcached_controller.go`][memcached_controller] implementation. 
+
+**Note**: If you used a value other than `github.com/example/memcached-operator` for repository (`--repo` flag) when running the `operator-sdk init` command, modify accordingly in the `import` block of the file.
 
 **Note**: The next two subsections explain how the controller watches resources and how the reconcile loop is triggered.
 If you'd like to skip this section, head to the [deploy](#run-the-operator) section to see how to run the operator.
@@ -202,6 +214,10 @@ The `NewControllerManagedBy()` provides a controller builder that allows various
 `For(&cachev1alpha1.Memcached{})` specifies the Memcached type as the primary resource to watch. For each Memcached type Add/Update/Delete event the reconcile loop will be sent a reconcile `Request` (a namespace/name key) for that Memcached object.
 
 `Owns(&appsv1.Deployment{})` specifies the Deployments type as the secondary resource to watch. For each Deployment type Add/Update/Delete event, the event handler will map each event to a reconcile `Request` for the owner of the Deployment. Which in this case is the Memcached object for which the Deployment was created.
+
+The dependent objects, in this case the Deployments, need to have an [Owner References](https://kubernetes.io/docs/concepts/overview/working-with-objects/owners-dependents/#owner-references-in-object-specifications) field that references their owner object. This will be added by using the method `ctrl.SetControllerReference`. [More info][k8s-doc-owner-ref]
+
+Note: The K8s api will manage the resources according to the`ownerRef` which will be properly set by using this method. Therefore, the K8s API will know that these resources, such as the Deployment to run the Memcached Operand image, depend on the custom resource for the Memcached Kind.  This allows the K8s API to delete all dependent resources when/if the custom resource is deleted. [More info][k8s-doc-deleting-cascade]
 
 ### Controller Configurations
 
@@ -392,6 +408,7 @@ metadata:
   name: memcached-sample
 spec:
   size: 3
+  containerPort: 11211
 ```
 
 Create the CR:
@@ -523,4 +540,6 @@ Next, check out the following:
 [controller-runtime]: https://github.com/kubernetes-sigs/controller-runtime
 [kb-doc-gkvs]: https://book.kubebuilder.io/cronjob-tutorial/gvks.html
 [rbac_markers]: https://book.kubebuilder.io/reference/markers/rbac.html
+[k8s-doc-owner-ref]: https://kubernetes.io/docs/concepts/overview/working-with-objects/owners-dependents/
+[k8s-doc-deleting-cascade]: https://kubernetes.io/docs/concepts/architecture/garbage-collection/#cascading-deletion
 [deploy-image-plugin-doc]: https://master.book.kubebuilder.io/plugins/deploy-image-plugin-v1-alpha.html

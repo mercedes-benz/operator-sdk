@@ -1,5 +1,5 @@
 /*
-Copyright 2022.
+Copyright 2023.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -37,10 +37,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	cachev1alpha1 "github.com/example/memcached-operator/api/v1alpha1"
-	// This sample has an example of how to create and work with custom metrics. The code is commented
-	// in order to not break the basic tutorial to show authors how to build an operator.
-	// To enable operator custom metrics, uncomment all sections with 'monitoring'.
-	//"github.com/example/memcached-operator/monitoring"
 )
 
 const memcachedFinalizer = "cache.example.com/finalizer"
@@ -82,7 +78,7 @@ type MemcachedReconciler struct {
 // For further info:
 // - About Operator Pattern: https://kubernetes.io/docs/concepts/extend-kubernetes/operator/
 // - About Controllers: https://kubernetes.io/docs/concepts/architecture/controller/
-// - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.13.0/pkg/reconcile
+// - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.14.1/pkg/reconcile
 func (r *MemcachedReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
 
@@ -241,8 +237,6 @@ func (r *MemcachedReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	// via the Size spec of the Custom Resource which we are reconciling.
 	size := memcached.Spec.Size
 	if *found.Spec.Replicas != size {
-		// Increment MemcachedDeploymentSizeUndesiredCountTotal metric by 1
-		//monitoring.MemcachedDeploymentSizeUndesiredCountTotal.Inc()
 		found.Spec.Replicas = &size
 		if err = r.Update(ctx, found); err != nil {
 			log.Error(err, "Failed to update Deployment",
