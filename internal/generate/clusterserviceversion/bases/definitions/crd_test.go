@@ -18,12 +18,13 @@ import (
 	"math/rand"
 	"reflect"
 	"sort"
-	"strings"
 	"time"
 
-	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/operator-framework/api/pkg/operators/v1alpha1"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 	"sigs.k8s.io/controller-tools/pkg/crd"
 	"sigs.k8s.io/controller-tools/pkg/loader"
 	"sigs.k8s.io/controller-tools/pkg/markers"
@@ -42,7 +43,7 @@ var _ = Describe("getTypedDescriptors", func() {
 
 	It("handles an empty set of marked fields", func() {
 		out = getTypedDescriptors(markedFields, reflect.TypeOf(v1alpha1.SpecDescriptor{}), spec)
-		Expect(out).To(HaveLen(0))
+		Expect(out).To(BeEmpty())
 	})
 	It("returns one spec descriptor for one spec marker on a field", func() {
 		markedFields[crd.TypeIdent{}] = []*fieldInfo{
@@ -78,7 +79,7 @@ var _ = Describe("getTypedDescriptors", func() {
 			},
 		}
 		out = getTypedDescriptors(markedFields, reflect.TypeOf(v1alpha1.SpecDescriptor{}), spec)
-		Expect(out).To(HaveLen(0))
+		Expect(out).To(BeEmpty())
 	})
 	It("returns one status descriptor for one status marker on a field", func() {
 		markedFields[crd.TypeIdent{}] = []*fieldInfo{
@@ -174,7 +175,8 @@ func makeMockMarkedFields() (markedFields map[crd.TypeIdent][]*fieldInfo, expect
 		if err != nil {
 			panic(err)
 		}
-		name := strings.Title(s)
+		caser := cases.Title(language.AmericanEnglish)
+		name := caser.String(s)
 		order := r.Int() % 200 // Very likely to get one conflict.
 		ident := crd.TypeIdent{Package: &loader.Package{}, Name: name}
 		if _, hasName := markedFields[ident]; hasName {

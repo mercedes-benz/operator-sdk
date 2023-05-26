@@ -20,7 +20,7 @@ import (
 	"os/exec"
 	"strings"
 
-	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
 	"github.com/operator-framework/api/pkg/apis/scorecard/v1alpha3"
@@ -59,7 +59,10 @@ func ScorecardSpec(tc *testutils.TestContext, operatorType string) func() {
 				"--wait-time", "4m")
 			outputBytes, err = tc.Run(cmd)
 			// Some tests are expected to fail, which results in scorecard exiting 1.
-			Expect(err).To(HaveOccurred())
+			// Go tests no longer expect to fail
+			if strings.ToLower(operatorType) != "go" {
+				Expect(err).To(HaveOccurred())
+			}
 			Expect(json.Unmarshal(outputBytes, &output)).To(Succeed())
 
 			expected := map[string]v1alpha3.State{
@@ -70,11 +73,18 @@ func ScorecardSpec(tc *testutils.TestContext, operatorType string) func() {
 				"olm-crds-have-validation": v1alpha3.FailState,
 				"olm-crds-have-resources":  v1alpha3.FailState,
 				"olm-spec-descriptors":     v1alpha3.FailState,
-				"olm-status-descriptors":   v1alpha3.FailState,
+				// For Ansible/Helm should PASS with a Suggestion
+				// For Golang should pass because we have status spec and descriptions
+				"olm-status-descriptors": v1alpha3.PassState,
 			}
 			if strings.ToLower(operatorType) == "go" {
 				// Go projects have generated CRD validation.
 				expected["olm-crds-have-validation"] = v1alpha3.PassState
+				// Go generated test operator now has CSV markers
+				// that allows these validations to pass
+				expected["olm-crds-have-resources"] = v1alpha3.PassState
+				expected["olm-spec-descriptors"] = v1alpha3.PassState
+				expected["olm-status-descriptors"] = v1alpha3.PassState
 				// The Go sample project tests a custom suite.
 				expected["customtest1"] = v1alpha3.PassState
 				expected["customtest2"] = v1alpha3.PassState

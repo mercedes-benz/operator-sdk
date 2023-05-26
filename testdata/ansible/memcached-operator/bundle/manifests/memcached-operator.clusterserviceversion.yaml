@@ -8,6 +8,13 @@ metadata:
           "apiVersion": "cache.example.com/v1alpha1",
           "kind": "Memcached",
           "metadata": {
+            "labels": {
+              "app.kubernetes.io/created-by": "memcached-operator",
+              "app.kubernetes.io/instance": "memcached-sample",
+              "app.kubernetes.io/managed-by": "kustomize",
+              "app.kubernetes.io/name": "memcached",
+              "app.kubernetes.io/part-of": "memcached-operator"
+            },
             "name": "memcached-sample"
           },
           "spec": {
@@ -16,6 +23,7 @@ metadata:
         }
       ]
     capabilities: Basic Install
+    createdAt: "2022-11-08T17:26:37Z"
   name: memcached-operator.v0.0.1
   namespace: placeholder
 spec:
@@ -92,7 +100,15 @@ spec:
           - create
         serviceAccountName: memcached-operator-controller-manager
       deployments:
-      - name: memcached-operator-controller-manager
+      - label:
+          app.kubernetes.io/component: manager
+          app.kubernetes.io/created-by: memcached-operator
+          app.kubernetes.io/instance: controller-manager
+          app.kubernetes.io/managed-by: kustomize
+          app.kubernetes.io/name: deployment
+          app.kubernetes.io/part-of: memcached-operator
+          control-plane: controller-manager
+        name: memcached-operator-controller-manager
         spec:
           replicas: 1
           selector:
@@ -106,13 +122,29 @@ spec:
               labels:
                 control-plane: controller-manager
             spec:
+              affinity:
+                nodeAffinity:
+                  requiredDuringSchedulingIgnoredDuringExecution:
+                    nodeSelectorTerms:
+                    - matchExpressions:
+                      - key: kubernetes.io/arch
+                        operator: In
+                        values:
+                        - amd64
+                        - arm64
+                        - ppc64le
+                        - s390x
+                      - key: kubernetes.io/os
+                        operator: In
+                        values:
+                        - linux
               containers:
               - args:
                 - --secure-listen-address=0.0.0.0:8443
                 - --upstream=http://127.0.0.1:8080/
                 - --logtostderr=true
                 - --v=0
-                image: gcr.io/kubebuilder/kube-rbac-proxy:v0.8.0
+                image: gcr.io/kubebuilder/kube-rbac-proxy:v0.13.1
                 name: kube-rbac-proxy
                 ports:
                 - containerPort: 8443
@@ -125,6 +157,11 @@ spec:
                   requests:
                     cpu: 5m
                     memory: 64Mi
+                securityContext:
+                  allowPrivilegeEscalation: false
+                  capabilities:
+                    drop:
+                    - ALL
               - args:
                 - --health-probe-bind-address=:6789
                 - --metrics-bind-address=127.0.0.1:8080
@@ -156,8 +193,13 @@ spec:
                     memory: 256Mi
                 securityContext:
                   allowPrivilegeEscalation: false
+                  capabilities:
+                    drop:
+                    - ALL
               securityContext:
                 runAsNonRoot: true
+                seccompProfile:
+                  type: RuntimeDefault
               serviceAccountName: memcached-operator-controller-manager
               terminationGracePeriodSeconds: 10
       permissions:

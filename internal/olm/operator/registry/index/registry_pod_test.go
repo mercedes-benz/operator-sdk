@@ -21,17 +21,17 @@ import (
 	"testing"
 	"time"
 
-	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/operator-framework/operator-sdk/internal/olm/operator"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	fakeclient "sigs.k8s.io/controller-runtime/pkg/client/fake"
-
-	"github.com/operator-framework/operator-sdk/internal/olm/operator"
 )
 
 const testIndexImageTag = "some-image:v1.2.3"
+const caSecretName = "foo-secret"
 
 // newFakeClient() returns a fake controller runtime client
 func newFakeClient() client.Client {
@@ -43,7 +43,7 @@ func TestCreateRegistryPod(t *testing.T) {
 	RunSpecs(t, "Test Registry Pod Suite")
 }
 
-var _ = Describe("RegistryPod", func() {
+var _ = Describe("SQLiteRegistryPod", func() {
 
 	var defaultBundleItems = []BundleItem{{
 		ImageTag: "quay.io/example/example-operator-bundle:0.2.0",
@@ -55,7 +55,7 @@ var _ = Describe("RegistryPod", func() {
 		Context("with valid registry pod values", func() {
 
 			var (
-				rp  *RegistryPod
+				rp  *SQLiteRegistryPod
 				cfg *operator.Configuration
 				pod *corev1.Pod
 				err error
@@ -66,15 +66,15 @@ var _ = Describe("RegistryPod", func() {
 					Client:    newFakeClient(),
 					Namespace: "test-default",
 				}
-				rp = &RegistryPod{
+				rp = &SQLiteRegistryPod{
 					BundleItems: defaultBundleItems,
 					IndexImage:  testIndexImageTag,
 				}
-				By("initializing the RegistryPod")
+				By("initializing the SQLiteRegistryPod")
 				Expect(rp.init(cfg)).To(Succeed())
 			})
 
-			It("should create the RegistryPod successfully", func() {
+			It("should create the SQLiteRegistryPod successfully", func() {
 				expectedPodName := "quay-io-example-example-operator-bundle-0-2-0"
 				Expect(rp).NotTo(BeNil())
 				Expect(rp.pod.Name).To(Equal(expectedPodName))
@@ -93,24 +93,26 @@ var _ = Describe("RegistryPod", func() {
 
 			It("should return a valid container command for one image", func() {
 				output, err := rp.getContainerCmd()
-				Expect(err).To(BeNil())
-				Expect(output).Should(Equal(containerCommandFor(defaultDBPath, defaultBundleItems, false, rp.SkipTLS)))
+				Expect(err).ToNot(HaveOccurred())
+				Expect(output).Should(Equal(containerCommandFor(defaultDBPath, defaultBundleItems, false, rp.SkipTLSVerify, false)))
 			})
 
 			It("should return a container command with --ca-file", func() {
-				rp.CASecretName = "foo-secret"
+				rp.CASecretName = caSecretName
 				output, err := rp.getContainerCmd()
-				Expect(err).To(BeNil())
-				Expect(output).Should(Equal(containerCommandFor(defaultDBPath, defaultBundleItems, true, rp.SkipTLS)))
+				Expect(err).ToNot(HaveOccurred())
+				Expect(output).Should(Equal(containerCommandFor(defaultDBPath, defaultBundleItems, true, rp.SkipTLSVerify, false)))
 			})
 
-			It("should return a container command for image with --skip-tls", func() {
-				bundles := []BundleItem{defaultBundleItems[0]}
-				rp.BundleItems = bundles
-				rp.SkipTLS = true
-				output, err := rp.getContainerCmd()
-				Expect(err).To(BeNil())
-				Expect(output).Should(Equal(containerCommandFor(defaultDBPath, bundles, false, rp.SkipTLS)))
+			It("should return a container command for image with --skip-tls-verify", func() {
+				if len(defaultBundleItems) > 0 {
+					bundles := []BundleItem{defaultBundleItems[0]}
+					rp.BundleItems = bundles
+					rp.SkipTLSVerify = true
+					output, err := rp.getContainerCmd()
+					Expect(err).ToNot(HaveOccurred())
+					Expect(output).Should(Equal(containerCommandFor(defaultDBPath, bundles, false, rp.SkipTLSVerify, false)))
+				}
 			})
 
 			It("should return a valid container command for three images", func() {
@@ -128,15 +130,65 @@ var _ = Describe("RegistryPod", func() {
 						AddMode:  SemverBundleAddMode,
 					},
 				)
-				rp2 := RegistryPod{
+				rp2 := SQLiteRegistryPod{
+					DBPath:        defaultDBPath,
+					GRPCPort:      defaultGRPCPort,
+					BundleItems:   bundleItems,
+					SkipTLSVerify: true,
+				}
+				output, err := rp2.getContainerCmd()
+				Expect(err).ToNot(HaveOccurred())
+				Expect(output).Should(Equal(containerCommandFor(defaultDBPath, bundleItems, false, rp2.SkipTLSVerify, false)))
+			})
+
+			It("should return a valid container command for one image", func() {
+				output, err := rp.getContainerCmd()
+				Expect(err).ToNot(HaveOccurred())
+				Expect(output).Should(Equal(containerCommandFor(defaultDBPath, defaultBundleItems, false, false, rp.UseHTTP)))
+			})
+
+			It("should return a container command with --ca-file", func() {
+				rp.CASecretName = caSecretName
+				output, err := rp.getContainerCmd()
+				Expect(err).ToNot(HaveOccurred())
+				Expect(output).Should(Equal(containerCommandFor(defaultDBPath, defaultBundleItems, true, false, rp.UseHTTP)))
+			})
+
+			It("should return a container command for image with --use-http", func() {
+				if len(defaultBundleItems) > 0 {
+					bundles := []BundleItem{defaultBundleItems[0]}
+					rp.BundleItems = bundles
+					rp.UseHTTP = true
+					output, err := rp.getContainerCmd()
+					Expect(err).ToNot(HaveOccurred())
+					Expect(output).Should(Equal(containerCommandFor(defaultDBPath, bundles, false, false, rp.UseHTTP)))
+				}
+			})
+
+			It("should return a valid container command for three images", func() {
+				bundleItems := append(defaultBundleItems,
+					BundleItem{
+						ImageTag: "quay.io/example/example-operator-bundle:0.3.0",
+						AddMode:  ReplacesBundleAddMode,
+					},
+					BundleItem{
+						ImageTag: "quay.io/example/example-operator-bundle:1.0.1",
+						AddMode:  SemverBundleAddMode,
+					},
+					BundleItem{
+						ImageTag: "localhost/example-operator-bundle:1.0.1",
+						AddMode:  SemverBundleAddMode,
+					},
+				)
+				rp2 := SQLiteRegistryPod{
 					DBPath:      defaultDBPath,
 					GRPCPort:    defaultGRPCPort,
 					BundleItems: bundleItems,
-					SkipTLS:     true,
+					UseHTTP:     true,
 				}
 				output, err := rp2.getContainerCmd()
-				Expect(err).To(BeNil())
-				Expect(output).Should(Equal(containerCommandFor(defaultDBPath, bundleItems, false, rp2.SkipTLS)))
+				Expect(err).ToNot(HaveOccurred())
+				Expect(output).Should(Equal(containerCommandFor(defaultDBPath, bundleItems, false, false, rp2.UseHTTP)))
 			})
 
 			It("check pod status should return successfully when pod check is true", func() {
@@ -144,14 +196,12 @@ var _ = Describe("RegistryPod", func() {
 					return true, nil
 				})
 
-				err := rp.checkPodStatus(context.Background(), mockGoodPodCheck)
-
-				Expect(err).To(BeNil())
+				Expect(rp.checkPodStatus(context.Background(), mockGoodPodCheck)).To(Succeed())
 			})
 
 			It("adds secrets and a service account to the pod", func() {
 				cfg.ServiceAccount = "foo"
-				rp.SecretName = "foo-secret"
+				rp.SecretName = caSecretName
 
 				pod, err = rp.podForBundleRegistry()
 				Expect(err).NotTo((HaveOccurred()))
@@ -190,24 +240,24 @@ var _ = Describe("RegistryPod", func() {
 
 			It("should error when bundle image is not provided", func() {
 				expectedErr := "bundle image set cannot be empty"
-				rp := &RegistryPod{}
+				rp := &SQLiteRegistryPod{}
 				err := rp.init(cfg)
-				Expect(err).NotTo(BeNil())
+				Expect(err).To(HaveOccurred())
 				Expect(err.Error()).Should(ContainSubstring(expectedErr))
 			})
 
 			It("should not accept any other bundle add mode other than semver or replaces", func() {
 				expectedErr := `bundle add mode "invalid" does not exist`
-				rp := &RegistryPod{
+				rp := &SQLiteRegistryPod{
 					BundleItems: []BundleItem{{ImageTag: "quay.io/example/example-operator-bundle:0.2.0", AddMode: "invalid"}},
 				}
 				err := rp.init(cfg)
-				Expect(err).NotTo(BeNil())
+				Expect(err).To(HaveOccurred())
 				Expect(err.Error()).Should(ContainSubstring(expectedErr))
 			})
 
 			It("checkPodStatus should return error when pod check is false and context is done", func() {
-				rp := &RegistryPod{
+				rp := &SQLiteRegistryPod{
 					BundleItems: defaultBundleItems,
 					IndexImage:  testIndexImageTag,
 				}
@@ -223,7 +273,7 @@ var _ = Describe("RegistryPod", func() {
 				cancel()
 
 				err := rp.checkPodStatus(ctx, mockBadPodCheck)
-				Expect(err).NotTo(BeNil())
+				Expect(err).To(HaveOccurred())
 				Expect(err.Error()).Should(ContainSubstring(expectedErr))
 			})
 		})
@@ -231,14 +281,15 @@ var _ = Describe("RegistryPod", func() {
 })
 
 // containerCommandFor returns the expected container command for a db path and set of bundle items.
-func containerCommandFor(dbPath string, items []BundleItem, hasCA, skipTLS bool) string { //nolint:unparam
+func containerCommandFor(dbPath string, items []BundleItem, hasCA, skipTLSVerify bool, useHTTP bool) string { //nolint:unparam
 	var caFlag string
 	if hasCA {
 		caFlag = " --ca-file=/certs/cert.pem"
 	}
 	additions := &strings.Builder{}
 	for _, item := range items {
-		additions.WriteString(fmt.Sprintf("opm registry add -d %s -b %s --mode=%s%s --skip-tls=%v && \\\n", dbPath, item.ImageTag, item.AddMode, caFlag, skipTLS))
+		additions.WriteString(fmt.Sprintf("opm registry add -d /tmp/tmp.db -b %s --mode=%s%s --skip-tls-verify=%v --use-http=%v && \\\n", item.ImageTag, item.AddMode, caFlag, skipTLSVerify, useHTTP))
 	}
-	return fmt.Sprintf("mkdir -p /database && \\\n%sopm registry serve -d /database/index.db -p 50051\n", additions.String())
+
+	return fmt.Sprintf("[[ -f %s ]] && cp %s /tmp/tmp.db; \\\n%sopm registry serve -d /tmp/tmp.db -p 50051\n", dbPath, dbPath, additions.String())
 }

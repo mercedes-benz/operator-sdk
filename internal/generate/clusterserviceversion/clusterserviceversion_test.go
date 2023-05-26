@@ -16,12 +16,13 @@ package clusterserviceversion
 
 import (
 	"bytes"
-	"io/ioutil"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/blang/semver/v4"
-	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/format"
 	operatorversion "github.com/operator-framework/api/pkg/lib/version"
@@ -101,7 +102,7 @@ var _ = Describe("Testing CRDs with single version", func() {
 				)
 
 				BeforeEach(func() {
-					tmp, err = ioutil.TempDir(".", "")
+					tmp, err = os.MkdirTemp(".", "")
 					Expect(err).ToNot(HaveOccurred())
 					col.ClusterServiceVersions = []v1alpha1.ClusterServiceVersion{*baseCSVUIMeta}
 				})
@@ -194,6 +195,7 @@ var _ = Describe("Testing CRDs with single version", func() {
 						Version:      zeroZeroOne,
 						Collector:    col,
 					}
+					newCSV.Annotations["createdAt"] = time.Now().UTC().Format(time.RFC3339)
 					csv, err := g.generate()
 					Expect(err).ToNot(HaveOccurred())
 					Expect(csv).To(Equal(newCSV))
@@ -213,6 +215,7 @@ var _ = Describe("Testing CRDs with single version", func() {
 					csvExp := newCSVUIMeta.DeepCopy()
 					csvExp.SetName("memcached-operator.v0.0.3")
 					csvExp.GetAnnotations()["olm.skipRange"] = "<0.0.2"
+					csvExp.Annotations["createdAt"] = time.Now().UTC().Format(time.RFC3339)
 					csvExp.Spec.Replaces = "memcached-operator.v0.0.2"
 					csvExp.Spec.Version.Patch = 3
 					Expect(csv).To(Equal(csvExp))
@@ -224,6 +227,7 @@ var _ = Describe("Testing CRDs with single version", func() {
 						Version:      zeroZeroOne,
 						Collector:    col,
 					}
+					newCSVUIMeta.Annotations["createdAt"] = time.Now().UTC().Format(time.RFC3339)
 					csv, err := g.generate()
 					Expect(err).ToNot(HaveOccurred())
 					Expect(csv).To(Equal(newCSVUIMeta))
@@ -234,6 +238,7 @@ var _ = Describe("Testing CRDs with single version", func() {
 						OperatorName: operatorName,
 						Collector:    col,
 					}
+					newCSVUIMeta.Annotations["createdAt"] = time.Now().UTC().Format(time.RFC3339)
 					csv, err := g.generate()
 					Expect(err).ToNot(HaveOccurred())
 					Expect(csv).To(Equal(newCSVUIMeta))
@@ -248,10 +253,13 @@ var _ = Describe("Testing CRDs with single version", func() {
 						Collector: &collector.Manifests{
 							ClusterServiceVersions: []v1alpha1.ClusterServiceVersion{*newCSVUIMeta},
 						},
+						Annotations: map[string]string{
+							"createdAt": time.Now().UTC().Format(time.RFC3339),
+						},
 					}
 					// Update the input's and expected CSV's Deployment image.
 					collectManifestsFromFileHelper(g.Collector, goBasicOperatorPath)
-					Expect(len(g.Collector.Deployments)).To(BeNumerically(">=", 1))
+					Expect(g.Collector.Deployments).ToNot(BeEmpty())
 					imageTag := "controller:v" + g.Version
 					modifyDepImageHelper(&g.Collector.Deployments[0].Spec, imageTag)
 					updatedCSV := updateCSV(newCSVUIMeta, modifyCSVDepImageHelper(imageTag))
@@ -261,7 +269,7 @@ var _ = Describe("Testing CRDs with single version", func() {
 					Expect(csv).To(Equal(updatedCSV))
 
 					// verify if conversion webhooks are added
-					Expect(len(csv.Spec.WebhookDefinitions)).NotTo(Equal(0))
+					Expect(csv.Spec.WebhookDefinitions).NotTo(BeEmpty())
 					Expect(containsConversionWebhookDefinition(csv.Spec.WebhookDefinitions)).To(BeTrue())
 				})
 			})
@@ -289,31 +297,25 @@ var _ = Describe("Testing CRDs with single version", func() {
 		)
 
 		Context("when base path does not exist", func() {
-			By("turning interaction off explicitly")
-			It("returns false", func() {
+			It("turning interaction off explicitly, it will returns false", func() {
 				Expect(requiresInteraction(testNotExistingPath, projutil.InteractiveHardOff)).To(BeFalse())
 			})
-			By("turning interaction off implicitly")
-			It("returns true", func() {
+			It("turning interaction off implicitly, it will returns true", func() {
 				Expect(requiresInteraction(testNotExistingPath, projutil.InteractiveSoftOff)).To(BeTrue())
 			})
-			By("turning interaction on explicitly")
-			It("returns true", func() {
+			It("turning interaction on explicitly, it will returns true", func() {
 				Expect(requiresInteraction(testNotExistingPath, projutil.InteractiveOnAll)).To(BeTrue())
 			})
 		})
 
 		Context("when base path does exist", func() {
-			By("turning interaction off explicitly")
-			It("returns false", func() {
+			It("turning interaction off explicitly, it will returns false", func() {
 				Expect(requiresInteraction(testExistingPath, projutil.InteractiveHardOff)).To(BeFalse())
 			})
-			By("turning interaction off implicitly")
-			It("returns false", func() {
+			It("turning interaction off implicitly, it will returns false", func() {
 				Expect(requiresInteraction(testExistingPath, projutil.InteractiveSoftOff)).To(BeFalse())
 			})
-			By("turning interaction on explicitly")
-			It("returns true", func() {
+			It("turning interaction on explicitly, it will returns true", func() {
 				Expect(requiresInteraction(testExistingPath, projutil.InteractiveOnAll)).To(BeTrue())
 			})
 		})
@@ -397,6 +399,7 @@ func initTestCSVsHelper() {
 	ExpectWithOffset(1, err).ToNot(HaveOccurred())
 	path = filepath.Join(csvNewLayoutBundleDir, "with-ui-metadata.clusterserviceversion.yaml")
 	newCSVUIMeta, newCSVUIMetaStr, err = getCSVFromFile(path)
+	newCSVUIMetaStr = strings.ReplaceAll(newCSVUIMetaStr, "2022-11-08T16:44:38Z", time.Now().UTC().Format(time.RFC3339))
 	ExpectWithOffset(1, err).ToNot(HaveOccurred())
 }
 
@@ -408,11 +411,12 @@ func initTestMultiVersionCSVHelper() {
 
 	path = filepath.Join(csvNewLayoutBundleDir, "memcached-operator-multiVersion.yaml")
 	_, multiVersionCSVStr, err = getCSVFromFile(path)
+	multiVersionCSVStr = strings.ReplaceAll(multiVersionCSVStr, "2022-11-08T16:44:38Z", time.Now().UTC().Format(time.RFC3339))
 	ExpectWithOffset(1, err).ToNot(HaveOccurred())
 }
 
 func readFileHelper(path string) string {
-	b, err := ioutil.ReadFile(path)
+	b, err := os.ReadFile(path)
 	ExpectWithOffset(1, err).ToNot(HaveOccurred())
 	return string(b)
 }
@@ -420,19 +424,19 @@ func readFileHelper(path string) string {
 func modifyCSVDepImageHelper(tag string) func(csv *v1alpha1.ClusterServiceVersion) {
 	return func(csv *v1alpha1.ClusterServiceVersion) {
 		depSpecs := csv.Spec.InstallStrategy.StrategySpec.DeploymentSpecs
-		ExpectWithOffset(2, len(depSpecs)).To(BeNumerically(">=", 1))
+		ExpectWithOffset(2, depSpecs).ToNot(BeEmpty())
 		modifyDepImageHelper(&depSpecs[0].Spec, tag)
 	}
 }
 
 func modifyDepImageHelper(depSpec *appsv1.DeploymentSpec, tag string) {
 	containers := depSpec.Template.Spec.Containers
-	ExpectWithOffset(1, len(containers)).To(BeNumerically(">=", 1))
+	ExpectWithOffset(1, containers).ToNot(BeEmpty())
 	containers[0].Image = tag
 }
 
 func getCSVFromFile(path string) (*v1alpha1.ClusterServiceVersion, string, error) {
-	b, err := ioutil.ReadFile(path)
+	b, err := os.ReadFile(path)
 	if err != nil {
 		return nil, "", err
 	}
@@ -460,6 +464,7 @@ func updateCSV(csv *v1alpha1.ClusterServiceVersion,
 	opts ...func(*v1alpha1.ClusterServiceVersion)) *v1alpha1.ClusterServiceVersion {
 
 	updated := csv.DeepCopy()
+	updated.Annotations["createdAt"] = time.Now().UTC().Format(time.RFC3339)
 	for _, opt := range opts {
 		opt(updated)
 	}
@@ -472,6 +477,7 @@ func upgradeCSV(csv *v1alpha1.ClusterServiceVersion, name, version string) *v1al
 	// Update CSV name and upgrade version.
 	upgraded.SetName(genutil.MakeCSVName(name, version))
 	upgraded.Spec.Version = operatorversion.OperatorVersion{Version: semver.MustParse(version)}
+	upgraded.Annotations["createdAt"] = time.Now().UTC().Format(time.RFC3339)
 
 	return upgraded
 }

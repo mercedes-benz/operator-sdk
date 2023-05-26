@@ -15,7 +15,7 @@
 package scorecard
 
 import (
-	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
 
@@ -69,12 +69,14 @@ var _ = Describe("Running the scorecard command", func() {
 			flag = cmd.Flags().Lookup("storage-image")
 			Expect(flag).NotTo(BeNil())
 			Expect(flag.Shorthand).To(Equal("b"))
-			Expect(flag.DefValue).To(Equal("docker.io/library/busybox@sha256:c71cb4f7e8ececaffb34037c2637dc86820e4185100e18b4d02d613a9bd772af"))
+			// Use the digest of the latest scorecard-storage image
+			Expect(flag.DefValue).To(Equal("quay.io/operator-framework/scorecard-storage@sha256:a3bfda71281393c7794cabdd39c563fb050d3020fd0b642ea164646bdd39a0e2"))
 
 			flag = cmd.Flags().Lookup("untar-image")
 			Expect(flag).NotTo(BeNil())
 			Expect(flag.Shorthand).To(Equal("u"))
-			Expect(flag.DefValue).To(Equal("registry.access.redhat.com/ubi8@sha256:910f6bc0b5ae9b555eb91b88d28d568099b060088616eba2867b07ab6ea457c7"))
+			// Use the digest of the latest scorecard-untar image
+			Expect(flag.DefValue).To(Equal("quay.io/operator-framework/scorecard-untar@sha256:2e728c5e67a7f4dec0df157a322dd5671212e8ae60f69137463bd4fdfbff8747"))
 		})
 	})
 

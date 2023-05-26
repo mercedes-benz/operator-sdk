@@ -20,7 +20,7 @@ permissions and watches so that it can manage and issue certificates for an enti
 
 **IMPORTANT**: When a [Manager][ctrl-manager] instance is created in the `main.go` file, the
 Namespaces are set via [Manager Options][ctrl-options] as described below. These Namespaces should be watched and
-cached for the Client which is provided by the Manager.Only clients provided by cluster-scoped Managers are able
+cached for the Client which is provided by the Manager. Only clients provided by cluster-scoped Managers are able
 to manage cluster-scoped CRD's. For further information see: [CRD scope doc][crd-scope-doc].
 
 ## Manager watching options
@@ -114,7 +114,7 @@ Update the [`RBAC markers`][rbac-markers] in `<kind>_controller.go` with `namesp
 //+kubebuilder:rbac:groups=cache.example.com,namespace=memcached-operator-system,resources=memcacheds/status,verbs=get;update;patch
 ```
 
-Then run `make manifests` to update `config/rbac/role.yaml`. In our example it would like:
+Then run `make manifests` to update `config/rbac/role.yaml`. In our example it would look like:
 
 ```yaml
 apiVersion: rbac.authorization.k8s.io/v1

@@ -27,11 +27,12 @@ set +u; source "${ENVDIR}/bin/activate"; set -u
 TMPDIR="$(mktemp -d)"
 trap_add "rm -rf $TMPDIR" EXIT
 pip3 install pyasn1==0.4.7 pyasn1-modules==0.2.6 idna==2.8 ipaddress==1.0.23
-pip3 install cryptography==3.3.2 molecule==3.0.2
+pip3 install cryptography==3.3.2 molecule==3.6.0
 pip3 install ansible-lint yamllint
-pip3 install docker==4.2.2 openshift==0.12.1 jmespath
+pip3 install docker openshift==0.12.1 jmespath
 ansible-galaxy collection install 'kubernetes.core:==2.2.0'
 ansible-galaxy collection install 'operator_sdk.util:==0.4.0'
+ansible-galaxy collection install 'community.docker:==3.4.0'
 
 header_text "Copying molecule testdata scenarios"
 ROOTDIR="$(pwd)"
@@ -48,8 +49,11 @@ else
   KUSTOMIZE="$(which kustomize)"
 fi
 KUSTOMIZE_PATH=${KUSTOMIZE} TEST_OPERATOR_NAMESPACE=default molecule test -s kind
+popd
 
 header_text "Running Default test with advanced-molecule-operator"
+
+make test-e2e-setup
 pushd $TMPDIR/advanced-molecule-operator
 
 make kustomize
@@ -63,3 +67,4 @@ DEST_IMAGE="quay.io/example/advanced-molecule-operator:v0.0.1"
 docker build -t "$DEST_IMAGE" --no-cache .
 load_image_if_kind "$DEST_IMAGE"
 KUSTOMIZE_PATH=$KUSTOMIZE OPERATOR_PULL_POLICY=Never OPERATOR_IMAGE=${DEST_IMAGE} TEST_OPERATOR_NAMESPACE=osdk-test molecule test
+popd

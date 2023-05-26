@@ -21,13 +21,11 @@ import (
 	"strings"
 	"testing"
 
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 	kbutil "sigs.k8s.io/kubebuilder/v3/pkg/plugin/util"
 
-	. "github.com/onsi/ginkgo"
-	. "github.com/onsi/gomega"
-
 	"github.com/operator-framework/operator-sdk/internal/testutils"
-	"github.com/operator-framework/operator-sdk/internal/util"
 )
 
 // TestE2EAnsible ensures the ansible projects built with the SDK tool by using its binary.
@@ -75,7 +73,7 @@ var _ = BeforeSuite(func() {
 	Expect(err).NotTo(HaveOccurred())
 
 	By("replacing project Dockerfile to use ansible base image with the dev tag")
-	err = util.ReplaceRegexInFile(filepath.Join(tc.Dir, "Dockerfile"), "quay.io/operator-framework/ansible-operator:.*", "quay.io/operator-framework/ansible-operator:dev")
+	err = kbutil.ReplaceRegexInFile(filepath.Join(tc.Dir, "Dockerfile"), "quay.io/operator-framework/ansible-operator:.*", "quay.io/operator-framework/ansible-operator:dev")
 	Expect(err).Should(Succeed())
 
 	By("adding Memcached mock task to the role")
@@ -121,6 +119,16 @@ var _ = BeforeSuite(func() {
 		filepath.Join(tc.Dir, "config", "samples", fmt.Sprintf("%s_%s_foo.yaml", tc.Group, tc.Version)),
 		"# TODO(user): Add fields here",
 		"foo: bar")
+	Expect(err).NotTo(HaveOccurred())
+
+	By("adding task to display annotations of Foo")
+	err = kbutil.ReplaceInFile(filepath.Join(tc.Dir, "roles", "foo", "tasks", "main.yml"),
+		"# tasks file for Foo", fooDebugAnnotations)
+	Expect(err).NotTo(HaveOccurred())
+
+	By("adding to watches annotations changes")
+	err = kbutil.ReplaceInFile(filepath.Join(tc.Dir, "watches.yaml"),
+		"role: foo", fooWatchCustomizations)
 	Expect(err).NotTo(HaveOccurred())
 
 	By("adding RBAC permissions for the Memcached Kind")
@@ -232,4 +240,24 @@ const rolesForBaseOperator = `
       - update
       - watch
 #+kubebuilder:scaffold:rules
+`
+const fooDebugAnnotations = `
+- name: Fetch annotations
+  k8s_info:
+    kind: Foo
+    api_version: cache.example.com/v1alpha1
+    name: "{{ ansible_operator_meta.name }}"
+    namespace: "{{ ansible_operator_meta.namespace }}"
+  register: foo_cr_info
+
+- name: Print annotations
+  debug:
+    msg: "test-annotation found : {{ foo_cr_info.resources[0].metadata.annotations['test-annotation'] }}"
+  when:
+  - foo_cr_info.resources | length > 0
+  - "'test-annotation' in foo_cr_info.resources[0].metadata.annotations | default({})"
+`
+
+const fooWatchCustomizations = `role: foo
+  watchAnnotationsChanges: true
 `

@@ -18,7 +18,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/http/httputil"
 
@@ -50,8 +50,8 @@ func (i *injectOwnerReferenceHandler) ServeHTTP(w http.ResponseWriter, req *http
 	case http.MethodPost:
 		dump, _ := httputil.DumpRequest(req, false)
 		log.V(2).Info("Dumping request", "RequestDump", string(dump))
-		rf := k8sRequest.RequestInfoFactory{APIPrefixes: sets.NewString("api", "apis"),
-			GrouplessAPIPrefixes: sets.NewString("api")}
+		rf := k8sRequest.RequestInfoFactory{APIPrefixes: sets.Set[string]{"api": {}, "apis": {}},
+			GrouplessAPIPrefixes: sets.Set[string]{"api": {}}}
 		r, err := rf.NewRequestInfo(req)
 		if err != nil {
 			m := "Could not convert request"
@@ -105,7 +105,7 @@ func (i *injectOwnerReferenceHandler) ServeHTTP(w http.ResponseWriter, req *http
 			return
 		}
 		if owner != nil {
-			body, err := ioutil.ReadAll(req.Body)
+			body, err := io.ReadAll(req.Body)
 			if err != nil {
 				m := "Could not read request body"
 				log.Error(err, m)
@@ -162,7 +162,7 @@ func (i *injectOwnerReferenceHandler) ServeHTTP(w http.ResponseWriter, req *http
 				return
 			}
 			log.V(2).Info("Serialized body", "Body", string(newBody))
-			req.Body = ioutil.NopCloser(bytes.NewBuffer(newBody))
+			req.Body = io.NopCloser(bytes.NewBuffer(newBody))
 			req.ContentLength = int64(len(newBody))
 
 			// add watch for resource

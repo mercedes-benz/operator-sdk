@@ -17,11 +17,17 @@ package golang
 import (
 	"path/filepath"
 
-	golangv2 "github.com/operator-framework/operator-sdk/hack/generate/samples/internal/go/v2"
-	golangv3 "github.com/operator-framework/operator-sdk/hack/generate/samples/internal/go/v3"
+	withcustomization "github.com/operator-framework/operator-sdk/hack/generate/samples/internal/go/memcached-with-customization"
 )
 
 func GenerateMemcachedSamples(binaryPath, rootPath string) {
-	golangv2.GenerateMemcachedSample(binaryPath, filepath.Join(rootPath, "go", "v2"))
-	golangv3.GenerateMemcachedSample(binaryPath, filepath.Join(rootPath, "go", "v3"))
+
+	// TODO: replace the Memcached implementation and update the tutorial
+	// to use the deploy.image/v1-alpha plugin to do the scaffold instead
+	// to create an empty scaffold add add all code. So that, we can also
+	// ensure that the tutorial follows the good practices
+	withcustomization.GenerateSample(binaryPath, filepath.Join(rootPath, "go", "v3"))
+	withcustomization.GenerateSample(binaryPath, filepath.Join(rootPath, "go", "v3", "monitoring"))
+	withcustomization.GenerateSample(binaryPath, filepath.Join(rootPath, "go", "v4-alpha"))
+	withcustomization.GenerateSample(binaryPath, filepath.Join(rootPath, "go", "v4-alpha", "monitoring"))
 }

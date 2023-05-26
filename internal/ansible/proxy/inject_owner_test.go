@@ -19,11 +19,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"testing"
 
-	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
 	corev1 "k8s.io/api/core/v1"
@@ -101,7 +101,7 @@ var _ = Describe("injectOwnerReferenceHandler", func() {
 			if err != nil {
 				Fail(fmt.Sprintf("Failed to create configmap: %v", err))
 			}
-			respBody, err := ioutil.ReadAll(resp.Body)
+			respBody, err := io.ReadAll(resp.Body)
 			if err != nil {
 				Fail(fmt.Sprintf("Failed to read response body: %v", err))
 			}
@@ -112,7 +112,7 @@ var _ = Describe("injectOwnerReferenceHandler", func() {
 			}
 			ownerRefs := modifiedCM.ObjectMeta.OwnerReferences
 
-			Expect(len(ownerRefs)).To(Equal(1))
+			Expect(ownerRefs).To(HaveLen(1))
 
 			ownerRef := ownerRefs[0]
 

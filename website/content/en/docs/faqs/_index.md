@@ -126,7 +126,7 @@ func main() {
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:        scheme,
 		// Specify that ImageStreamTag's should not be cached.
-		ClientBuilder: manager.NewClientBuilder().WithUncached(&imagev1.ImageStreamTag{}),
+		ClientDisableCacheFor:  []client.Object{&imagev1.ImageStreamTag{}},
 	})
 }
 ```
@@ -165,7 +165,7 @@ SHELL := /bin/bash
 ---
 
 Administrators can configure proxy-friendly Operators to support network proxies by
-specifiying `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` environment
+specifying `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` environment
 variables in the Operator deployment. (These variables can be handled by OLM.)
 
 Proxy-friendly Operators are responsible for inspecting the Operator
@@ -174,6 +174,22 @@ For more information and examples, please see the type-specific docs:
 - [Ansible][ansible-proxy-vars]
 - [Golang][go-proxy-vars]
 - [Helm][helm-proxy-vars]
+
+
+## After running `make manifests`, `rbac` permissions are not updated in config
+
+[RBAC markers][rbac-markers] that are not followed by a newline will not be
+parsed correctly, resulting in missing `rbac` configuration.
+
+This is a known issue with `controller-tools`, see [issue #551][controller-tools-issue-551]
+The current workaround is to add a new line after the `rbac` marker.
+
+```go
+// +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=core,resources=pods,verbs=get;list;
+
+func (r *MemcachedReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+```
 
 [ansible-proxy-vars]: /docs/building-operators/ansible/reference/proxy-vars/
 [client.Reader]:https://pkg.go.dev/sigs.k8s.io/controller-runtime/pkg/client#Reader
@@ -192,6 +208,7 @@ For more information and examples, please see the type-specific docs:
 [rbac]:https://kubernetes.io/docs/reference/access-authn-authz/rbac/
 [scorecard-doc]: https://sdk.operatorframework.io/docs/testing-operators/scorecard/
 [project-doc]: /docs/overview/project-layout
+[controller-tools-issue-551]: https://github.com/kubernetes-sigs/controller-tools/issues/551
 
 ## Preserve the `preserveUnknownFields` in your CRDs
 
@@ -230,3 +247,113 @@ bundle: manifests kustomize ## Generate bundle manifests and metadata, then vali
 
 Note:
 Though this is a bug with controller-gen which is used by Operator SDK to generate CRD, this is a workaround from our end to enable users to preserve the field after controller-gen has run.
+
+## What is the bundle limit size? Was this amount increased?
+
+Bundles have a size limitation because their manifests are used to create a configMap, and the Kubernetes API does not 
+allow configMaps larger than `~1MB`. Beginning with [OLM](https://github.com/operator-framework/operator-lifecycle-manager) version `v0.19.0` 
+and [OPM](https://github.com/operator-framework/operator-registry) `1.17.5`, 
+these values are now compressed accommodating larger bundles. ([More info](https://github.com/operator-framework/operator-registry/pull/685)).
+
+The change to allow bigger bundles from [OLM](https://github.com/operator-framework/operator-lifecycle-manager) version `v0.19.0` only impacts the full bundle size amount. 
+Any single manifest within the bundle such as the CRD will still make the bundle uninstallable if it exceeds the default file size limit on clusters (`~1MB`).
+
+## The size of my Operator bundle is too big. What can I do?
+
+If your bundle is too large, there are a few things you can try:
+
+  * Reducing the number of [CRD versions][k8s-crd-versions] supported in your Operator by deprecating and then removing older API versions. It is a good idea to have a clear plan for deprecation and removal of old CRDs versions when new ones get added, see [Kubernetes API change practices][k8s-api-change]. Also, refer to the [Kubernetes API conventions][k8s-api-convention].
+  * Reduce the verbosity of your API documentation. (We do not recommend eliminating documenting the APIs)
+
+## How can I update dependencies for an unsupported release image?
+
+The Operator-SDK community releases updated images for supported
+releases. If you are using an older version of Operator-SDK, sometimes
+the dependencies will need to be updated in the images. For users in
+this situation we recommend updating to the latest version. If this is
+not possible, users can build and push their own versions of any of the
+images provided by the Operator-SDK. 
+
+**Operator-SDK**
+docker buildx build  -t quay.io/operator-framework/operator-sdk:dev -f ./images/operator-sdk/Dockerfile --load .
+
+**Helm-Operator**
+docker buildx build  -t quay.io/operator-framework/helm-operator:dev -f ./images/helm-operator/Dockerfile --load .
+
+**Scorecard-test**
+docker buildx build  -t quay.io/operator-framework/scorecard-test:dev -f ./images/scorecard-test/Dockerfile --load .
+
+**Scorecard-test-kuttl**
+docker buildx build  -t quay.io/operator-framework/scorecard-test-kuttl:dev -f ./images/scorecard-test-kuttl/Dockerfile --load .
+
+
+### Ansible
+
+Ansible images are built in 2 layers, and both will need to be rebuilt.
+Build and push the dependency image
+`images/ansible-operator/base.Dockerfile`, and then update `FROM` in
+`images/ansible-operator/Dockerfile` to point to your image, and build
+and push this image, which can be added to your operator's  `FROM`.
+
+**Ansible Operator (2.9) base**
+`docker buildx build  -t quay.io/operator-framework/ansible-operator-base:dev -f ./images/ansible-operator/base.Dockerfile --load images/ansible-operator`
+
+**Ansible Operator (2.9)**
+`docker buildx build  -t quay.io/operator-framework/ansible-operator:dev -f ./images/ansible-operator/Dockerfile --load .`
+
+**Ansible Operator (2.11) Dependencies**
+`docker buildx build  -t quay.io/operator-framework/ansible-operator-2.11-preview-base:dev -f ./images/ansible-operator-2.11-preview/base.Dockerfile --load images/ansible-operator-2.11-preview`
+
+**Ansible Operator (2.11)**
+`docker buildx build  -t quay.io/operator-framework/ansible-operator-2.11-preview:dev -f ./images/ansible-operator-2.11-preview/Dockerfile --load .`
+
+
+[k8s-crd-versions]: https://kubernetes.io/docs/tasks/extend-kubernetes/custom-resources/custom-resource-definition-versioning/#specify-multiple-versions
+[k8s-api-change]: https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api_changes.md
+[k8s-api-convention]: https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md
+
+## Running `operator-sdk create api` results in an error with `/usr/local/go/src/net/cgo_linux.go:13:8: no such package located` in the error message
+
+By default Go will set the `CGO_ENABLED` environment variable to `1` which means that [cgo][cgo-docs] is enabled. Depending on the architecture and OS of your system you may run into an issue similar to this one: 
+
+```sh
+/usr/local/go/src/net/cgo_linux.go:13:8: no such package located
+Error: not all generators ran successfully
+run `controller-gen object:headerFile=hack/boilerplate.go.txt paths=./... -w` to see all available markers, or `controller-gen object:headerFile=hack/boilerplate.go.txt paths=./... -h` for usage
+make: *** [Makefile:95: generate] Error 1
+Error: failed to create API: unable to run post-scaffold tasks of "base.go.kubebuilder.io/v3": exit status 2
+```
+
+Here are a couple workarounds to try to resolve the issue:
+
+- Ensure `gcc` is installed
+- Set the `CGO_ENABLED` environment variable to `0` to disable [cgo][cgo-docs]
+
+If neither of those solutions work for you, please [open an issue][open-issue]
+
+## After updating my project to use a Kustomize 4.x version, 'make bundle' does not work
+
+**Valid only for Golang/Hybrid projects using webhooks**
+
+> `Error: remove operation does not apply:doc is missing path: "/spec/template/spec/containers/1/volumeMounts/0": missing value` 
+
+The error occurs due to a change in the Kustomize 4.x versions where the containers used in the Deployment spec of your CSV
+are no longer added at the same order. To sort it out you can update replace the target `/spec/template/spec/containers/1/volumeMounts/0`
+with `/spec/template/spec/containers/0/volumeMounts/0` in `config/manifest/kustomization.yaml`.
+
+**NOTE** You MUST use SDK CLI versions > 1.22. Previous versions have a bug 
+where the command `operator-sdk generate kustomize manifests` is not respecting the changes
+made on this manifest. 
+
+[cgo-docs]: https://pkg.go.dev/cmd/cgo
+[open-issue]: https://github.com/operator-framework/operator-sdk/issues/new/choose
+
+## 'operator-sdk run bundle' command fails and the registry pod has an error of 'mkdir: can't create directory '/database': Permission denied'
+
+In Operator SDK version `v1.22.0`, the `operator-sdk run bundle` command started using the new file-based catalog (FBC) bundle format by default. Earlier releases used the deprecated SQLite format. The command uses `quay.io/operator-framework/opm:latest` as the index image for creating a registry pod. Due to recent pod security updates, using the latest version of `opm` does not work as expected with the SQLite bundle format.
+
+There are two workarounds available to resolve this issue:
+1. You can update the Operator SDK to version `v1.22.0` or later. Updating to a more recent version makes `operator-sdk run bundle` utilize the new FBC bundle format.
+2. If you are not ready to update your version of the Operator SDK, you can manually specify the index image by using the `--index-image=quay.io/operator-framework/opm:v1.23.0` flag.
+
+**Note:** The SQLite bundle format is deprecated and will be removed in a future release. If you can, it is recommended that you upgrade a newer version of the Operator SDK to resolve the issue.

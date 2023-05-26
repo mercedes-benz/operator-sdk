@@ -18,7 +18,7 @@ import (
 	"fmt"
 	"path/filepath"
 
-	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/spf13/afero"
 )
@@ -33,7 +33,7 @@ var _ = Describe("Labels", func() {
 
 		Context("with valid annotations contents", func() {
 			var (
-				metadata      Labels
+				metadata      LabelsMap
 				path, expPath string
 			)
 			BeforeEach(func() {
@@ -45,7 +45,7 @@ var _ = Describe("Labels", func() {
 				expPath = defaultPath
 				writeMetadataHelper(fs, expPath, annotationsStringValidV1)
 				metadata, path, err = findBundleMetadata(fs, "/bundle")
-				Expect(err).To(BeNil())
+				Expect(err).ToNot(HaveOccurred())
 				Expect(path).To(Equal(expPath))
 				Expect(metadata).To(BeEquivalentTo(annotationsValidV1))
 			})
@@ -53,7 +53,7 @@ var _ = Describe("Labels", func() {
 				expPath = "/bundle/metadata/my-metadata.yaml"
 				writeMetadataHelper(fs, expPath, annotationsStringValidV1)
 				metadata, path, err = findBundleMetadata(fs, "/bundle")
-				Expect(err).To(BeNil())
+				Expect(err).ToNot(HaveOccurred())
 				Expect(path).To(Equal(expPath))
 				Expect(metadata).To(BeEquivalentTo(annotationsValidV1))
 			})
@@ -61,7 +61,7 @@ var _ = Describe("Labels", func() {
 				expPath = "/bundle/my-dir/my-metadata.yaml"
 				writeMetadataHelper(fs, expPath, annotationsStringValidV1)
 				metadata, path, err = findBundleMetadata(fs, "/bundle")
-				Expect(err).To(BeNil())
+				Expect(err).ToNot(HaveOccurred())
 				Expect(path).To(Equal(expPath))
 				Expect(metadata).To(BeEquivalentTo(annotationsValidV1))
 			})
@@ -69,7 +69,7 @@ var _ = Describe("Labels", func() {
 				expPath = "/bundle/my-parent-dir/my-dir/annotations.yaml"
 				writeMetadataHelper(fs, expPath, annotationsStringValidV1)
 				metadata, path, err = findBundleMetadata(fs, "/bundle")
-				Expect(err).To(BeNil())
+				Expect(err).ToNot(HaveOccurred())
 				Expect(path).To(Equal(expPath))
 				Expect(metadata).To(BeEquivalentTo(annotationsValidV1))
 			})
@@ -78,7 +78,7 @@ var _ = Describe("Labels", func() {
 				writeMetadataHelper(fs, expPath, annotationsStringValidV1)
 				writeMetadataHelper(fs, "/bundle/other-metadata/annotations.yaml", annotationsStringValidNoRegLabels)
 				metadata, path, err = findBundleMetadata(fs, "/bundle")
-				Expect(err).To(BeNil())
+				Expect(err).ToNot(HaveOccurred())
 				Expect(path).To(Equal(expPath))
 				Expect(metadata).To(BeEquivalentTo(annotationsValidV1))
 			})
@@ -87,7 +87,7 @@ var _ = Describe("Labels", func() {
 				writeMetadataHelper(fs, expPath, annotationsStringValidV1)
 				writeMetadataHelper(fs, "/bundle/custom2/annotations.yaml", annotationsStringValidNoRegLabels)
 				metadata, path, err = findBundleMetadata(fs, "/bundle")
-				Expect(err).To(BeNil())
+				Expect(err).ToNot(HaveOccurred())
 				Expect(path).To(Equal(expPath))
 				Expect(metadata).To(BeEquivalentTo(annotationsValidV1))
 			})
@@ -97,7 +97,7 @@ var _ = Describe("Labels", func() {
 				expPath = defaultPath
 				writeMetadataHelper(fs, defaultPath, annotationsStringValidNoRegLabels)
 				metadata, path, err = findBundleMetadata(fs, "/bundle")
-				Expect(err).To(BeNil())
+				Expect(err).ToNot(HaveOccurred())
 				Expect(path).To(Equal(expPath))
 				Expect(metadata).To(BeEquivalentTo(annotationsValidNoRegLabels))
 			})
@@ -140,7 +140,7 @@ func writeMetadataHelper(fs afero.Fs, path, contents string) {
 	ExpectWithOffset(1, afero.WriteFile(fs, path, []byte(contents), 0666)).Should(Succeed())
 }
 
-var annotationsValidV1 = Labels{
+var annotationsValidV1 = LabelsMap{
 	"operators.operatorframework.io.bundle.mediatype.v1": "registry+v1",
 	"operators.operatorframework.io.bundle.metadata.v1":  "metadata/",
 	"foo": "bar",
@@ -152,7 +152,7 @@ const annotationsStringValidV1 = `annotations:
   foo: bar
 `
 
-var annotationsValidNoRegLabels = Labels{
+var annotationsValidNoRegLabels = LabelsMap{
 	"foo": "bar",
 	"baz": "buf",
 }

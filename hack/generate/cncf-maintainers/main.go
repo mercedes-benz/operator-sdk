@@ -1,8 +1,8 @@
 package main
 
 import (
-	"io/ioutil"
 	"log"
+	"os"
 
 	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/yaml"
@@ -14,11 +14,11 @@ type aliasesMap struct {
 }
 
 func main() {
-	ownersData, err := ioutil.ReadFile("OWNERS")
+	ownersData, err := os.ReadFile("OWNERS")
 	if err != nil {
 		log.Fatal(err)
 	}
-	aliasData, err := ioutil.ReadFile("OWNERS_ALIASES")
+	aliasData, err := os.ReadFile("OWNERS_ALIASES")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -33,9 +33,9 @@ func main() {
 		log.Fatal(err)
 	}
 
-	expandedOwners := make(map[string]sets.String)
+	expandedOwners := make(map[string]sets.Set[string])
 	for group, ownersAliases := range owners {
-		expandedOwners[group] = sets.NewString()
+		expandedOwners[group] = sets.New[string]()
 		for _, alias := range ownersAliases {
 			if members, ok := aliases.Aliases[alias]; ok {
 				expandedOwners[group].Insert(members...)
@@ -47,7 +47,7 @@ func main() {
 
 	outOwners := make(map[string][]string)
 	for g, m := range expandedOwners {
-		outOwners[g] = m.List()
+		outOwners[g] = sets.List(m)
 	}
 
 	out, err := yaml.Marshal(outOwners)
@@ -55,7 +55,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	if err := ioutil.WriteFile(".cncf-maintainers", out, 0644); err != nil {
+	if err := os.WriteFile(".cncf-maintainers", out, 0644); err != nil {
 		log.Fatal(err)
 	}
 }

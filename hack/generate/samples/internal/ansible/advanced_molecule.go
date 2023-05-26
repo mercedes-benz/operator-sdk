@@ -24,7 +24,6 @@ import (
 	kbutil "sigs.k8s.io/kubebuilder/v3/pkg/plugin/util"
 
 	"github.com/operator-framework/operator-sdk/hack/generate/samples/internal/pkg"
-	"github.com/operator-framework/operator-sdk/internal/util"
 )
 
 // AdvancedMolecule defines the context for the sample
@@ -188,7 +187,7 @@ func (ma *AdvancedMolecule) updateConfig() {
         - "--ansible-args='--vault-password-file /opt/ansible/pwd.yml'"`
 	err = kbutil.InsertCode(
 		filepath.Join(ma.ctx.Dir, "config", "default", "manager_auth_proxy_patch.yaml"),
-		"- \"--leader-elect\"",
+		"- \"--leader-election-id=advanced-molecule-operator\"",
 		managerAuthArgs)
 	pkg.CheckError("adding vaulting args to the proxy auth", err)
 
@@ -235,11 +234,17 @@ func (ma *AdvancedMolecule) addMocksFromTestdata() {
 	cmd = exec.Command("cp", "-r", "../../../hack/generate/samples/internal/ansible/testdata/inventory/", filepath.Join(ma.ctx.Dir, "inventory/"))
 	_, err = ma.ctx.Run(cmd)
 	pkg.CheckError("adding inventory/", err)
+
+	log.Infof("adding finalizer for finalizerconcurrencytest")
+	cmd = exec.Command("cp", "../../../hack/generate/samples/internal/ansible/testdata/playbooks/finalizerconcurrencyfinalizer.yml", filepath.Join(ma.ctx.Dir, "playbooks/finalizerconcurrencyfinalizer.yml"))
+	_, err = ma.ctx.Run(cmd)
+	pkg.CheckError("adding finalizer for finalizerconccurencytest", err)
+
 }
 
 func (ma *AdvancedMolecule) updateDockerfile() {
 	log.Infof("replacing project Dockerfile to use ansible base image with the dev tag")
-	err := util.ReplaceRegexInFile(
+	err := kbutil.ReplaceRegexInFile(
 		filepath.Join(ma.ctx.Dir, "Dockerfile"),
 		"quay.io/operator-framework/ansible-operator:.*",
 		"quay.io/operator-framework/ansible-operator:dev")
@@ -456,8 +461,6 @@ func (ma *AdvancedMolecule) updatePlaybooks() {
         command: '{{ exec_command }}'
       register: exec_result
 
-    - debug: var=exec_result
-
     - name: Get logs from busybox pod
       k8s_log:
         name: '{{ meta.name }}-busybox'
@@ -516,6 +519,36 @@ func (ma *AdvancedMolecule) updatePlaybooks() {
 		clusterAnnotationTest)
 	pkg.CheckError("adding playbook for clusterannotationtest", err)
 
+	log.Infof("adding playbook for finalizerconcurrencytest")
+	const finalizerConcurrencyTest = `---
+- hosts: localhost
+  gather_facts: no
+  collections:
+    - kubernetes.core
+    - operator_sdk.util
+
+  tasks:
+    - debug:
+        msg: "Pausing until configmap exists"
+
+    - name: Wait for configmap
+      k8s_info:
+        apiVersion: v1
+        kind: ConfigMap
+        name: unpause-reconciliation
+        namespace: osdk-test
+      wait: yes
+      wait_sleep: 10
+      wait_timeout: 360
+
+    - debug:
+        msg: "Unpause!"
+`
+	err = kbutil.ReplaceInFile(
+		filepath.Join(ma.ctx.Dir, "playbooks", "finalizerconcurrencytest.yml"),
+		originalPlaybookFragment,
+		finalizerConcurrencyTest)
+	pkg.CheckError("adding playbook for finalizerconcurrencytest", err)
 }
 
 func (ma *AdvancedMolecule) addPlaybooks() {
@@ -524,6 +557,7 @@ func (ma *AdvancedMolecule) addPlaybooks() {
 		"CaseTest",
 		"CollectionTest",
 		"ClusterAnnotationTest",
+		"FinalizerConcurrencyTest",
 		"ReconciliationTest",
 		"SelectorTest",
 		"SubresourcesTest",

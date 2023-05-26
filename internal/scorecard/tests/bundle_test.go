@@ -18,7 +18,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	scapiv1alpha3 "github.com/operator-framework/api/pkg/apis/scorecard/v1alpha3"
 	apimanifests "github.com/operator-framework/api/pkg/manifests"
@@ -176,6 +176,24 @@ var _ = Describe("Basic and OLM tests", func() {
 				Expect(result.State).To(Equal(scapiv1alpha3.PassState))
 			})
 
+			It("should return warning when no spec status are defined for CRD", func() {
+				cr = unstructured.Unstructured{
+					Object: map[string]interface{}{
+						"spec": map[string]interface{}{
+							"spec": "val",
+						},
+					},
+				}
+				cr.SetGroupVersionKind(schema.GroupVersionKind{
+					Kind:  "TestKind",
+					Group: "test.example.com",
+				})
+
+				result = checkOwnedCSVStatusDescriptor(cr, &csv, result)
+				Expect(result.Suggestions).To(HaveLen(1))
+				Expect(result.State).To(Equal(scapiv1alpha3.PassState))
+			})
+
 			It("should pass when CR Object Descriptor is nil", func() {
 				cr := unstructured.Unstructured{
 					Object: nil,
@@ -265,7 +283,7 @@ var _ = Describe("Basic and OLM tests", func() {
 					},
 				}
 				result = checkSpec(cr, result)
-				Expect(result.State).To(Equal(scapiv1alpha3.FailState))
+				Expect(result.State).To(Equal(scapiv1alpha3.PassState))
 			})
 			It("should pass when CRs do have spec field specified", func() {
 				cr := []unstructured.Unstructured{
@@ -424,7 +442,6 @@ var _ = Describe("Basic and OLM tests", func() {
 			result = CheckResources(crd, result)
 			Expect(result.State).To(Equal(scapiv1alpha3.FailState))
 		})
-
 	})
 
 })

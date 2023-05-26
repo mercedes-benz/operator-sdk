@@ -19,6 +19,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/sirupsen/logrus"
+
 	"github.com/iancoleman/strcase"
 	"github.com/spf13/pflag"
 	"helm.sh/helm/v3/pkg/chart"
@@ -40,6 +42,7 @@ const (
 	helmChartVersionFlag = "helm-chart-version"
 
 	defaultCrdVersion = "v1"
+	legacyCrdVersion  = "v1beta1"
 
 	// defaultGroup is the Kubernetes CRD API Group used for fetched charts when the --group flag is not specified
 	defaultGroup = "charts"
@@ -120,11 +123,21 @@ func (p *createAPISubcommand) BindFlags(fs *pflag.FlagSet) {
 	fs.StringVar(&p.options.chartOptions.Version, helmChartVersionFlag, "", "helm chart version (default: latest)")
 
 	fs.StringVar(&p.options.CRDVersion, crdVersionFlag, defaultCrdVersion, "crd version to generate")
+	// (not required raise an error in this case)
+	// nolint:errcheck,gosec
+	fs.MarkDeprecated(crdVersionFlag, util.WarnMessageRemovalV1beta1)
 }
 
 func (p *createAPISubcommand) InjectConfig(c config.Config) error {
 	p.config = c
 
+	return nil
+}
+
+func (p *createAPISubcommand) PreScaffold(machinery.Filesystem) error {
+	if p.options.CRDVersion == legacyCrdVersion {
+		logrus.Warn(util.WarnMessageRemovalV1beta1)
+	}
 	return nil
 }
 
@@ -188,11 +201,13 @@ func (p *createAPISubcommand) InjectResource(res *resource.Resource) error {
 	}
 
 	// Check that the provided group can be added to the project
+	// nolint:staticcheck
 	if !p.config.IsMultiGroup() && p.config.ResourcesLength() != 0 && !p.config.HasGroup(p.resource.Group) {
 		return fmt.Errorf("multiple groups are not allowed by default, to enable multi-group set 'multigroup: true' in your PROJECT file")
 	}
 
 	// Selected CRD version must match existing CRD versions.
+	// nolint:staticcheck
 	if pluginutil.HasDifferentCRDVersion(p.config, p.resource.API.CRDVersion) {
 		return fmt.Errorf("only one CRD version can be used for all resources, cannot add %q", p.resource.API.CRDVersion)
 	}

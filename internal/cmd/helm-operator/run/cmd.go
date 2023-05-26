@@ -21,6 +21,7 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -36,6 +37,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager/signals"
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 
+	helmClient "github.com/operator-framework/operator-sdk/internal/helm/client"
 	"github.com/operator-framework/operator-sdk/internal/helm/controller"
 	"github.com/operator-framework/operator-sdk/internal/helm/flags"
 	"github.com/operator-framework/operator-sdk/internal/helm/metrics"
@@ -192,13 +194,23 @@ func run(cmd *cobra.Command, f *flags.Flags) {
 		log.Error(err, "Failed to create new manager factories.")
 		os.Exit(1)
 	}
+	acg, err := helmClient.NewActionConfigGetter(mgr.GetConfig(), mgr.GetRESTMapper(), mgr.GetLogger())
+	if err != nil {
+		log.Error(err, "Failed to create Helm action config getter")
+		os.Exit(1)
+	}
 	for _, w := range ws {
 		// Register the controller with the factory.
+		reconcilePeriod := f.ReconcilePeriod
+		if w.ReconcilePeriod.Duration != time.Duration(0) {
+			reconcilePeriod = w.ReconcilePeriod.Duration
+		}
+
 		err := controller.Add(mgr, controller.WatchOptions{
 			Namespace:               namespace,
 			GVK:                     w.GroupVersionKind,
-			ManagerFactory:          release.NewManagerFactory(mgr, w.ChartDir),
-			ReconcilePeriod:         f.ReconcilePeriod,
+			ManagerFactory:          release.NewManagerFactory(mgr, acg, w.ChartDir),
+			ReconcilePeriod:         reconcilePeriod,
 			WatchDependentResources: *w.WatchDependentResources,
 			OverrideValues:          w.OverrideValues,
 			MaxConcurrentReconciles: f.MaxConcurrentReconciles,

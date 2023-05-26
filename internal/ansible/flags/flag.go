@@ -40,6 +40,7 @@ type Flags struct {
 	GracefulShutdownTimeout time.Duration
 	AnsibleArgs             string
 	AnsibleLogEvents        string
+	ProxyPort               int
 
 	// Path to a controller-runtime componentconfig file.
 	// If this is empty, use default values.
@@ -95,7 +96,7 @@ func (f *Flags) AddTo(flagSet *pflag.FlagSet) {
 	// Controller flags.
 	flagSet.DurationVar(&f.ReconcilePeriod,
 		"reconcile-period",
-		time.Minute,
+		10*time.Hour,
 		"Default reconcile period for controllers",
 	)
 	flagSet.IntVar(&f.MaxConcurrentReconciles,
@@ -169,6 +170,11 @@ func (f *Flags) AddTo(flagSet *pflag.FlagSet) {
 		"Ansible log events. The log level for console logging."+
 			" This flag can be set to either Nothing, Tasks, or Everything.",
 	)
+	flagSet.IntVar(&f.ProxyPort,
+		"proxy-port",
+		8888,
+		"Ansible proxy server port. Defaults to 8888.",
+	)
 }
 
 // ToManagerOptions uses the flag set in f to configure options.
@@ -201,7 +207,7 @@ func (f *Flags) ToManagerOptions(options manager.Options) manager.Options {
 		options.LeaderElectionNamespace = f.LeaderElectionNamespace
 	}
 	if options.LeaderElectionResourceLock == "" {
-		options.LeaderElectionResourceLock = resourcelock.ConfigMapsResourceLock
+		options.LeaderElectionResourceLock = resourcelock.ConfigMapsLeasesResourceLock
 	}
 	if changed("graceful-shutdown-timeout") || options.GracefulShutdownTimeout == nil {
 		options.GracefulShutdownTimeout = &f.GracefulShutdownTimeout

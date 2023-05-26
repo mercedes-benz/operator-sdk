@@ -15,7 +15,7 @@
 package bundle
 
 import (
-	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
 
@@ -26,7 +26,7 @@ var _ = Describe("Running a bundle command", func() {
 			Expect(cmd).NotTo(BeNil())
 
 			subcommands := cmd.Commands()
-			Expect(len(subcommands)).To(Equal(1))
+			Expect(subcommands).To(HaveLen(1))
 			Expect(subcommands[0].Use).To(Equal("validate"))
 		})
 	})

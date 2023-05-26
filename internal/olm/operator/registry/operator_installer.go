@@ -31,6 +31,8 @@ import (
 
 	olmclient "github.com/operator-framework/operator-sdk/internal/olm/client"
 	"github.com/operator-framework/operator-sdk/internal/olm/operator"
+
+	corev1 "k8s.io/api/core/v1"
 )
 
 type OperatorInstaller struct {
@@ -41,7 +43,7 @@ type OperatorInstaller struct {
 	InstallMode           operator.InstallMode
 	CatalogCreator        CatalogCreator
 	CatalogUpdater        CatalogUpdater
-	SupportedInstallModes sets.String
+	SupportedInstallModes sets.Set[string]
 
 	cfg *operator.Configuration
 }
@@ -142,7 +144,7 @@ func (o OperatorInstaller) UpgradeOperator(ctx context.Context) (*v1alpha1.Clust
 	log.Infof("Found existing catalog source with name %s and namespace %s", cs.Name, cs.Namespace)
 
 	// Update catalog source
-	err := o.CatalogUpdater.UpdateCatalog(ctx, cs)
+	err := o.CatalogUpdater.UpdateCatalog(ctx, cs, subscription)
 	if err != nil {
 		return nil, fmt.Errorf("update catalog error: %v", err)
 	}
@@ -208,7 +210,7 @@ func (o OperatorInstaller) ensureOperatorGroup(ctx context.Context) error {
 			return fmt.Errorf("use install mode %q to watch operator's namespace %q", v1alpha1.InstallModeTypeOwnNamespace, o.cfg.Namespace)
 		}
 
-		supported = supported.Intersection(sets.NewString(string(o.InstallMode.InstallModeType)))
+		supported = supported.Intersection(sets.New[string](string(o.InstallMode.InstallModeType)))
 		if supported.Len() == 0 {
 			return fmt.Errorf("operator %q does not support install mode %q", o.StartingCSV, o.InstallMode.InstallModeType)
 		}
@@ -246,8 +248,8 @@ func (o *OperatorInstaller) isOperatorGroupCompatible(og v1.OperatorGroup, targe
 	}
 
 	// otherwise, check that the target namespaces match
-	targets := sets.NewString(targetNamespaces...)
-	ogtargets := sets.NewString(og.Spec.TargetNamespaces...)
+	targets := sets.New[string](targetNamespaces...)
+	ogtargets := sets.New[string](og.Spec.TargetNamespaces...)
 	if !ogtargets.Equal(targets) {
 		return fmt.Errorf("existing operatorgroup %q is not compatible with install mode %q", og.Name, o.InstallMode)
 	}
@@ -345,11 +347,17 @@ func (o OperatorInstaller) waitForInstallPlan(ctx context.Context, sub *v1alpha1
 		Name:      sub.GetName(),
 	}
 
+	// Get the previous InstallPlanRef
+	prevIPRef := corev1.ObjectReference{}
+	if sub.Status.InstallPlanRef != nil {
+		prevIPRef = *sub.Status.InstallPlanRef
+	}
+
 	ipCheck := wait.ConditionFunc(func() (done bool, err error) {
 		if err := o.cfg.Client.Get(ctx, subKey, sub); err != nil {
 			return false, err
 		}
-		if sub.Status.InstallPlanRef != nil {
+		if sub.Status.InstallPlanRef != nil && sub.Status.InstallPlanRef.Name != prevIPRef.Name {
 			return true, nil
 		}
 		return false, nil
@@ -361,7 +369,7 @@ func (o OperatorInstaller) waitForInstallPlan(ctx context.Context, sub *v1alpha1
 	return nil
 }
 
-func (o *OperatorInstaller) getTargetNamespaces(supported sets.String) ([]string, error) {
+func (o *OperatorInstaller) getTargetNamespaces(supported sets.Set[string]) ([]string, error) {
 	switch {
 	case supported.Has(string(v1alpha1.InstallModeTypeAllNamespaces)):
 		return nil, nil

@@ -15,7 +15,7 @@
 package packagemanifests
 
 import (
-	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
 	"github.com/operator-framework/operator-sdk/internal/olm/operator"
@@ -31,7 +31,7 @@ var _ = Describe("Running a run packagemanifests command", func() {
 			Expect(cmd.Short).NotTo(BeNil())
 			Expect(cmd.Long).NotTo(BeNil())
 			aliases := cmd.Aliases
-			Expect(len(aliases)).To(Equal(1))
+			Expect(aliases).To(HaveLen(1))
 			Expect(aliases[0]).To(Equal("pm"))
 		})
 	})

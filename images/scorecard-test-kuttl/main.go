@@ -19,7 +19,7 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"log"
 	"os"
 
@@ -31,10 +31,10 @@ import (
 // scorecard v1alpha3.TestStatus json format.
 //
 // The kuttl output is expected to be produced by kubectl-kuttl
-// at /tmp/kuttl-test.json.
+// at /tmp/kuttl-report.json.
 func main() {
 
-	jsonFile, err := os.Open("/tmp/kuttl-test.json")
+	jsonFile, err := os.Open("/tmp/kuttl-report.json")
 	if err != nil {
 		printErrorStatus(fmt.Errorf("could not open kuttl report %v", err))
 		return
@@ -42,7 +42,7 @@ func main() {
 	defer jsonFile.Close()
 
 	var byteValue []byte
-	byteValue, err = ioutil.ReadAll(jsonFile)
+	byteValue, err = io.ReadAll(jsonFile)
 	if err != nil {
 		printErrorStatus(fmt.Errorf("could not read kuttl report %v", err))
 		return
@@ -57,7 +57,7 @@ func main() {
 
 	var suite *Testsuite
 	if len(jsonReport.Testsuite) == 0 {
-		printErrorStatus(errors.New("empty kuttl test suite was found"))
+		printErrorStatus(errors.New("no kuttl test suite was found. kuttl may not have run successfully"))
 		return
 	}
 
@@ -103,6 +103,7 @@ func printErrorStatus(err error) {
 	r := v1alpha3.TestResult{}
 	r.State = v1alpha3.FailState
 	r.Errors = []string{err.Error()}
+	r.Log = getKuttlLogs()
 	s.Results = append(s.Results, r)
 	jsonOutput, err := json.MarshalIndent(s, "", "    ")
 	if err != nil {
@@ -187,16 +188,14 @@ type Testsuites struct {
 }
 
 func getKuttlLogs() string {
-	stderrFile, err := ioutil.ReadFile("/tmp/kuttl.stderr")
+	stderrFile, err := os.ReadFile("/tmp/kuttl.stderr")
 	if err != nil {
-		printErrorStatus(fmt.Errorf("could not open kuttl stderr file %v", err))
-		return err.Error()
+		return fmt.Sprintf("could not open kuttl stderr file: %v", err)
 	}
 
-	stdoutFile, err := ioutil.ReadFile("/tmp/kuttl.stdout")
+	stdoutFile, err := os.ReadFile("/tmp/kuttl.stdout")
 	if err != nil {
-		printErrorStatus(fmt.Errorf("could not open kuttl stdout file %v", err))
-		return err.Error()
+		return fmt.Sprintf("could not open kuttl stdout file: %v", err)
 	}
 
 	return string(stderrFile) + string(stdoutFile)

@@ -53,14 +53,15 @@ const (
 
 // AnsibleOperatorReconciler - object to reconcile runner requests
 type AnsibleOperatorReconciler struct {
-	GVK              schema.GroupVersionKind
-	Runner           runner.Runner
-	Client           client.Client
-	APIReader        client.Reader
-	EventHandlers    []events.EventHandler
-	ReconcilePeriod  time.Duration
-	ManageStatus     bool
-	AnsibleDebugLogs bool
+	GVK                     schema.GroupVersionKind
+	Runner                  runner.Runner
+	Client                  client.Client
+	APIReader               client.Reader
+	EventHandlers           []events.EventHandler
+	ReconcilePeriod         time.Duration
+	ManageStatus            bool
+	AnsibleDebugLogs        bool
+	WatchAnnotationsChanges bool
 }
 
 // Reconcile - handle the event.
@@ -243,8 +244,9 @@ func (r *AnsibleOperatorReconciler) Reconcile(ctx context.Context, request recon
 	// and do it at the end
 	runSuccessful := len(failureMessages) == 0
 
+	recentlyDeleted := u.GetDeletionTimestamp() != nil
+
 	// The finalizer has run successfully, time to remove it
-	deleted = u.GetDeletionTimestamp() != nil
 	if deleted && finalizerExists && runSuccessful {
 		controllerutil.RemoveFinalizer(u, finalizer)
 		err := r.Client.Update(ctx, u)
@@ -252,6 +254,9 @@ func (r *AnsibleOperatorReconciler) Reconcile(ctx context.Context, request recon
 			logger.Error(err, "Failed to remove finalizer")
 			return reconcileResult, err
 		}
+	} else if recentlyDeleted && finalizerExists {
+		// If the CR was deleted after the reconcile began, we need to requeue for the finalizer.
+		reconcileResult.Requeue = true
 	}
 	if r.ManageStatus {
 		errmark := r.markDone(ctx, request.NamespacedName, u, statusEvent, failureMessages)

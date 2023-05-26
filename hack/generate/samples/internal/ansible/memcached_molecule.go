@@ -16,6 +16,7 @@ package ansible
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -24,7 +25,6 @@ import (
 	kbutil "sigs.k8s.io/kubebuilder/v3/pkg/plugin/util"
 
 	"github.com/operator-framework/operator-sdk/hack/generate/samples/internal/pkg"
-	"github.com/operator-framework/operator-sdk/internal/util"
 )
 
 // MemcachedMolecule defines the context for the sample
@@ -84,8 +84,13 @@ func (ma *MemcachedMolecule) Run() {
 	err = kbutil.InsertCode(moleculeTaskPath, testSecretMoleculeCheck, testFooMoleculeCheck)
 	pkg.CheckError("replacing memcached task to add foo check", err)
 
+	log.Infof("insert molecule task to check custom metrics")
+	err = kbutil.InsertCode(moleculeTaskPath, testFooMoleculeCheck, customMetricsTest)
+
+	pkg.CheckError("replacing memcached task to add foo check", err)
+
 	log.Infof("replacing project Dockerfile to use ansible base image with the dev tag")
-	err = util.ReplaceRegexInFile(filepath.Join(ma.ctx.Dir, "Dockerfile"), "quay.io/operator-framework/ansible-operator:.*", "quay.io/operator-framework/ansible-operator:dev")
+	err = kbutil.ReplaceRegexInFile(filepath.Join(ma.ctx.Dir, "Dockerfile"), "quay.io/operator-framework/ansible-operator:.*", "quay.io/operator-framework/ansible-operator:dev")
 	pkg.CheckError("replacing Dockerfile", err)
 
 	log.Infof("adding RBAC permissions")
@@ -181,6 +186,17 @@ func (ma *MemcachedMolecule) Run() {
 	err = kbutil.ReplaceInFile(filepath.Join(ma.ctx.Dir, "watches.yaml"),
 		"role: secret", manageStatusFalseForRoleSecret)
 	pkg.CheckError("replacing in watches.yaml", err)
+
+	// prevent high load of controller caused by watching all the secrets in the cluster
+	watchNamespacePatchFileName := "watch_namespace_patch.yaml"
+	log.Info("adding WATCH_NAMESPACE env patch to watch own namespace")
+	err = os.WriteFile(filepath.Join(ma.ctx.Dir, "config", "testing", watchNamespacePatchFileName), []byte(watchNamespacePatch), 0644)
+	pkg.CheckError("adding watch_namespace_patch.yaml", err)
+
+	log.Info("adding WATCH_NAMESPACE env patch to patch list to be applied")
+	err = kbutil.InsertCode(filepath.Join(ma.ctx.Dir, "config", "testing", "kustomization.yaml"), "patchesStrategicMerge:",
+		fmt.Sprintf("\n- %s", watchNamespacePatchFileName))
+	pkg.CheckError("inserting in kustomization.yaml", err)
 
 	log.Infof("removing FIXME asserts from memfin_test.yml")
 	err = kbutil.ReplaceInFile(filepath.Join(ma.ctx.Dir, "molecule", "default", "tasks", "memfin_test.yml"),

@@ -81,13 +81,28 @@ To validate a bundle against the validator for Good Practices specifically, in a
 
 To validate a bundle against the (alpha) validator for Deprecated APIs specifically, in addition to required bundle validators:
 
-  $ operator-sdk bundle validate ./bundle --select-optional name=alpha-deprecated-apis --optional-values=k8s-version=1.22	
-	
+  $ operator-sdk bundle validate ./bundle --select-optional name=alpha-deprecated-apis --optional-values=k8s-version=1.22
+
+To validate a bundle against an external validator, in addition to required bundle validators:
+
+  $ operator-sdk bundle validate ./bundle --alpha-select-external /path/to/external-validator[:/path/to/optional-second-validator]
+
+To validate a bundle against the (alpha) validator for Multiple Architectures bundle validation, in addition to required bundle validators:
+
+IMPORTANT: To use this option it is required to have access to pull the images defined on the CSV.
+
+  $ operator-sdk bundle validate ./bundle --select-optional name=multiarch 
+
+NOTE: The --optional-values can be used to inform the container-tools that should be used i.e. "--optional-values=container-tools=docker".
+The valid values for the container-tools optional value are [docker, podman, none]. If no value is supplied then the command will default to using docker to inspect the images.
+More info: https://github.com/operator-framework/api/blob/master/pkg/validation/internal/multiarch.go
+
 ```
 
 ### Options
 
 ```
+      --alpha-select-external string                         Selector to select external validators to run. It should be set to a Unix path list ("/path/to/e1.sh:/path/to/e2")
   -h, --help                                                 help for validate
   -b, --image-builder string                                 Tool to pull and unpack bundle images. Only used when validating a bundle image. One of: [docker, podman, none] (default "docker")
       --list-optional                                        List all optional validators available. When set, no validators will be run
